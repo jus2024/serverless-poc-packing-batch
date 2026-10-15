@@ -14,6 +14,7 @@ import {
   LOT_PREFIX,
   ITEM_PREFIX,
 } from "../shared/unit-keys.js";
+import { SEED_UNIT_COUNT_MAX_DEFAULT } from "../shared/runtime-config.js";
 import type { RoastBatchStatus } from "../shared/types.js";
 
 /** ルーティングで扱う 6 ルート（design §4.4）。 */
@@ -89,6 +90,17 @@ export const ALLOWED_BATCH_STATUS: RoastBatchStatus[] = [
 /** `POST /batches` の unit_count 既定（design §6.4 / §14。補完は API 層が所有）。 */
 export const DEFAULT_UNIT_COUNT = 1000;
 
+/**
+ * ルーティング時の環境依存オプション（design §14）。
+ *
+ * `seedUnitCountMax` は `POST /batches` の unit_count 上限検証に使う。handler が実行時に
+ * `resolveVerificationConfig()` から解決して渡す。未指定時は runtime-config の既定を使い、
+ * routes.ts 単体でも自己完結してテストできるようにする（design §14 / §4.1）。
+ */
+export interface RouteOptions {
+  seedUnitCountMax?: number;
+}
+
 /** ルーティングの入力（API Gateway プロキシイベントの必要部分）。 */
 export interface RouteRequest {
   httpMethod: string;
@@ -98,7 +110,10 @@ export interface RouteRequest {
   queryStringParameters?: Record<string, string | undefined> | null;
 }
 
-function validateCreateBatch(body: string | null | undefined): CreateBatchAction {
+function validateCreateBatch(
+  body: string | null | undefined,
+  seedUnitCountMax: number,
+): CreateBatchAction {
   if (body === null || body === undefined || body === "") {
     throw new HttpError(400, "BadRequest", "request body is required");
   }
@@ -122,12 +137,22 @@ function validateCreateBatch(body: string | null | undefined): CreateBatchAction
     throw new HttpError(400, "BadRequest", "roast_date must be an ISO 8601 date (YYYY-MM-DD)");
   }
 
-  // unit_count は任意（既定 1000。補完は API 層が所有。design §6.4）
+  // unit_count は任意（既定 1000。補完は API 層が所有。design §6.4）。
+  // 範囲は 1〜SEED_UNIT_COUNT_MAX、範囲外は作成時に 400（design §14）。上限超過を作成時に
+  // 弾くことで、seeder 起動後の非同期 RuntimeConfigError（LABELING のまま完了遷移しない縮退）
+  // に先送りしない。
   let unit_count = DEFAULT_UNIT_COUNT;
   if (parsed.unit_count !== undefined) {
     const n = parsed.unit_count;
     if (typeof n !== "number" || !Number.isInteger(n) || n < 1) {
       throw new HttpError(400, "BadRequest", "unit_count must be a positive integer");
+    }
+    if (n > seedUnitCountMax) {
+      throw new HttpError(
+        400,
+        "BadRequest",
+        `unit_count must be between 1 and ${seedUnitCountMax}`,
+      );
     }
     unit_count = n;
   }
@@ -187,9 +212,13 @@ function validateListUnits(
 /**
  * ルーティング + 入力検証（design §6.4 / §4.4）。handler が実行するアクションを返す。
  * 未知のルートは 404。
+ *
+ * @param options 環境依存の検証パラメータ（design §14）。`seedUnitCountMax` は
+ *   `POST /batches` の unit_count 上限検証に使う。未指定時は runtime-config の既定。
  */
-export function routeRequest(req: RouteRequest): RouteAction {
+export function routeRequest(req: RouteRequest, options: RouteOptions = {}): RouteAction {
   const method = req.httpMethod.toUpperCase();
+  const seedUnitCountMax = options.seedUnitCountMax ?? SEED_UNIT_COUNT_MAX_DEFAULT;
 
   if (method === "OPTIONS") {
     return { kind: "options" };
@@ -197,7 +226,7 @@ export function routeRequest(req: RouteRequest): RouteAction {
 
   switch (req.resource) {
     case "/batches":
-      if (method === "POST") return validateCreateBatch(req.body);
+      if (method === "POST") return validateCreateBatch(req.body, seedUnitCountMax);
       if (method === "GET") return validateListBatches(req.queryStringParameters);
       break;
     case "/batches/{batchId}":

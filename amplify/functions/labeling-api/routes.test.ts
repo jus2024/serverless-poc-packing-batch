@@ -76,6 +76,28 @@ describe("routeRequest: POST /batches（画面 A）", () => {
     ).toThrowError(expect.objectContaining({ statusCode: 400 }));
   });
 
+  it("unit_count が SEED_UNIT_COUNT_MAX 上限超過は作成時に 400（design §14）", () => {
+    // 既定上限（SEED_UNIT_COUNT_MAX_DEFAULT=1200）を超える値は弾く
+    expect(() =>
+      routeRequest(
+        req({ item_id: "ITEM#x", lot_id: "LOT#x", roast_date: "2026-10-09", unit_count: 9999 }),
+      ),
+    ).toThrowError(expect.objectContaining({ statusCode: 400 }));
+    // options で渡した上限を境界に、上限ちょうどは受理・上限+1 は 400
+    expect(
+      routeRequest(
+        req({ item_id: "ITEM#x", lot_id: "LOT#x", roast_date: "2026-10-09", unit_count: 500 }),
+        { seedUnitCountMax: 500 },
+      ),
+    ).toMatchObject({ kind: "createBatch", unit_count: 500 });
+    expect(() =>
+      routeRequest(
+        req({ item_id: "ITEM#x", lot_id: "LOT#x", roast_date: "2026-10-09", unit_count: 501 }),
+        { seedUnitCountMax: 500 },
+      ),
+    ).toThrowError(expect.objectContaining({ statusCode: 400 }));
+  });
+
   it("ボディ欠落は 400", () => {
     expect(() => routeRequest(req(undefined))).toThrowError(
       expect.objectContaining({ statusCode: 400 }),

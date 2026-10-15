@@ -60,13 +60,18 @@ export const handler = async (
   event: APIGatewayProxyEvent,
 ): Promise<APIGatewayProxyResult> => {
   try {
-    const action = routeRequest({
-      httpMethod: event.httpMethod,
-      resource: event.resource,
-      body: event.body,
-      pathParameters: event.pathParameters,
-      queryStringParameters: event.queryStringParameters,
-    });
+    // unit_count の上限検証（design §14）に使う SEED_UNIT_COUNT_MAX を実行時に解決して渡す
+    const { seedUnitCountMax } = resolveVerificationConfig();
+    const action = routeRequest(
+      {
+        httpMethod: event.httpMethod,
+        resource: event.resource,
+        body: event.body,
+        pathParameters: event.pathParameters,
+        queryStringParameters: event.queryStringParameters,
+      },
+      { seedUnitCountMax },
+    );
     return await execute(action);
   } catch (err) {
     if (err instanceof HttpError) {

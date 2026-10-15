@@ -549,6 +549,10 @@ API Gateway プロキシ統合の 1 ハンドラが 6 ルートを `event.httpMe
 
 - `POST /batches`: 入力（`item_id` / `lot_id` / `roast_date` / `unit_count`）を検証し
   `status=ROASTING_DONE`・`created_at` を付けて `PutItem`（要件 8.1 / 8.2 / 8.4）。
+  **`batch_id` は衝突回避のため API が生成する**: `BATCH#<lot_id から LOT# を剥がした本体>-<作成時刻の
+  ISO 8601 タイムスタンプ>`（例 `BATCH#2026-10-01-003-2026-10-16T06:55:00.000Z`）。glossary / §3.1
+  の `BATCH#2026-10-09-AM-01` は ID 形式の例示であり、実際の値は同一ロットの複数回登録でも一意に
+  なるようタイムスタンプを連結する（キーとして一意・決定的）。
   **`unit_count` 省略時は既定 1000 を確定値として PutItem する（レビュー指摘 7）**。既定の補完は
   この API 層が所有し、roast-batch に確定した数値を書き込む。seeder は roast-batch を信頼して
   `GetItem` で `unit_count` を読む設計（§6.1）であり、**seeder 側で既定補完は行わない**（補完の
@@ -574,7 +578,7 @@ API Gateway プロキシ統合の 1 ハンドラが 6 ルートを `event.httpMe
 
 | 関数 | 権限 |
 |------|------|
-| seeder | unit への `BatchWriteItem` / `PutItem`、roast-batch への `GetItem` / `UpdateItem` |
+| seeder | unit への `BatchWriteItem` / `PutItem`、roast-batch への `GetItem`（状態遷移は持たない。§6.1 / §6.4） |
 | labeling-router | （Streams 読み取りは `DynamoEventSource` が付与）、SQS `SendMessage*` |
 | labeling-worker | （SQS 受信は `SqsEventSource` が付与）、unit への `UpdateItem`、roast-batch への `UpdateItem` |
 | labeling-api | roast-batch への `GetItem` / `PutItem` / `UpdateItem` / `Scan`、unit への `Query`（基表 + GSI 2 本）、seeder への `lambda:InvokeFunction`（非同期起動用） |
@@ -997,7 +1001,12 @@ invoke しない。レビュー指摘 1 の二重起動抑止が API 層で効�
    SQS 受信メッセージ（または worker ログ）で `seq=1`（`-000001`）、`seq=unit_count`
    （例 `-001000`）、`BATCH#` 剥がし後の本体の 3 ケースを確認し、`unit_id` の衝突・不一致が
    無いこと（＝ worker の冪等条件が効くこと）を確かめる。あわせて SQS ペイロードに
-   `unit_count` が載っていること（HIGH-1・案 B）も確認する。
+   `unit_count` が載っていること（HIGH-1・案 B）、かつ **JSON 数値（文字列ではない）として
+   運ばれていること**を確認する（Pipes `inputTemplate` の `<$.dynamodb.NewImage.unit_count.N>`
+   が数値のまま射影されるかは合成では担保できない。design-review NIT-1）。worker の
+   `parsePayload` は `typeof unit_count !== "number"` を弾くため、文字列化された場合は当該
+   メッセージが失敗報告 → 再試行/DLQ となる。SQS 受信メッセージ（または worker ログ）で
+   `unit_count` が `"1000"` ではなく `1000` であることを目視確認する。
 5. 画面 C で `labeled_count/unit_count` が増え、達成で `status=LABELED`・`labeling_finished_at` 確定。
 6. 画面 D で batch/lot から Unit をトレース（`best_before`/`qr_payload`/`labeled_at`）。
 7. `RELAY_MODE` を変えて再デプロイし、入口方式の立ち上がりカーブを比較（R5 / 要件 5.5）。
