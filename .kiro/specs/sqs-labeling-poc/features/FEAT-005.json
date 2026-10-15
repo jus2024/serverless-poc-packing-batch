@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-005",
+  "type": "docs",
+  "description": "README.md を本 PoC 向けに更新する。構成図テキスト・セットアップ・検証シナリオ・クリーンアップ・デプロイ影響を記載。FEAT-001〜004 の成果物を前提に書く（最後に行う）。design §17 / 要件12 / repo-workflow 方針。",
+  "status": "pending",
+  "steps": [
+    "README.md に構成図テキスト（design §2.1 の全体像: 画面 A〜D → API Gateway → seeder/Streams → Pipes/router → SQS → worker → DynamoDB、可観測性）を追記する。",
+    "セットアップ手順（npm install → npx ampx sandbox、amplify_outputs.json の custom.labelingApiUrl を .env.local の NEXT_PUBLIC_LABELING_API_URL に写す）を記載する。",
+    "検証シナリオ（design §17 の 1〜9）を記載する。特に Pipes の unit_id 文字列一致と unit_count の Number 保持を実機で突き合わせる 3 境界ケース（seq=1→-000001 / seq=unit_count / BATCH# 剥がし、design-review NIT-1）を明記する。",
+    "クリーンアップ（sandbox 削除で SqsLabelingPoc スタックごと一括破棄・既存 Todo は温存）を記載する。",
+    "デプロイ影響（CI の node 22 引き上げ・テスト追加、影響は CI のみで Amplify Hosting/AgentCore に波及しない。RELAY_MODE 切替は再デプロイが必要）と、seeder 失敗時の縮退挙動（完了遷移成立せず画面 C 未完了・batch 作り直し、design-review NIT-2）を記載する。"
+  ],
+  "acceptance_criteria": [
+    "README.md に構成図・セットアップ・検証シナリオ・クリーンアップ・デプロイ影響の各節がある",
+    "RELAY_MODE が再デプロイを要する設定であることと pipes/lambda/both の意味が記載されている",
+    "既存 Todo/sample を壊さず温存する旨が記載されている"
+  ],
+  "verification": [
+    "README.md を読み、構成図テキスト・セットアップ・検証シナリオ・クリーンアップ・デプロイ影響の節が揃っていることを確認する"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "テスト基盤（vitest）と CI を整備する。これ以降の全 FEAT のユニット/合成テスト検証の前提になるため最初に行う。他 FEAT から独立しており、単体で buildable。design §16.0 / レビュー第 2R-2。",
+  "status": "completed",
+  "steps": [
+    "package.json の devDependencies に vitest・@types/aws-lambda・aws-sdk-client-mock・aws-sdk-client-mock-jest を正確なバージョンピン止め（キャレット無し）で追加する。実在する安定版の具体バージョンを調べて固定する（例: vitest は現行安定メジャー）。",
+    "package.json の scripts に \"test\": \"vitest --run\" と \"test:watch\": \"vitest\" を追加する（EC PoC の表記に合わせ --run を使う）。",
+    "リポジトリルートに vitest.config.ts を新設する。node 環境、include は amplify/**/*.test.ts と src/**/*.test.ts、@/* パスエイリアスを tsconfig の baseUrl(./) に合わせて解決（vite-tsconfig-paths を足さず resolve.alias で '@' を __dirname に向ける簡素な設定でよい）。",
+    ".github/workflows/ci.yml の actions/setup-node の node-version を 20 から 22 に変更する。",
+    ".github/workflows/ci.yml の『型チェック』ステップの後に『テスト』ステップ（run: npm run test）を追加する。実機デプロイを伴う結合テストは含めない。"
+  ],
+  "acceptance_criteria": [
+    "npm install が成功し、追加 devDependency がすべてピン止め（キャレット無し）で記録されている",
+    "npx vitest --run がテスト未配置の段階でもエラーなく（0 件 or 既存テストのみ）終了する",
+    "ci.yml の setup-node が node-version: 22 になっており、npm run test ステップが存在し YAML が構文的に妥当",
+    "npm run lint が通る（既存コードに影響しない）"
+  ],
+  "verification": [
+    "npm install",
+    "npx vitest --run",
+    "npm run lint"
+  ],
+  "blocked_reason": null,
+  "findings": "導入バージョン（すべてキャレット無しでピン止め）: vitest 3.2.7 / @types/aws-lambda 8.10.164 / aws-sdk-client-mock 4.1.0 / aws-sdk-client-mock-jest 4.1.0。\n\n[重要] vitest のメジャー選定: npm の latest タグは 5.0.5 だが、vitest 5 は rolldown 依存の新メジャーで、(1) ネイティブバインディング未取得（npm optional-deps バグ npm/cli#4828）、(2) 本プロジェクトの peer 競合（react 19 vs @aws-amplify/ui-react 同梱 @xstate/react の react18 peer）と絡んだ arborist クラッシュ（Cannot read properties of null reading 'edgesOut'）の両方で install に失敗した。安定した V3 タグの 3.2.7 を採用（engines: node ^18||^20||>=22 で CI の node22 と整合、標準 vite バンドラ使用でネイティブバインディング不要、EC PoC 時代とも整合）。後続 FEAT もこの 3.x 系を前提にテストを書くこと。@vitest/* 系の追加パッケージ（ui/browser/coverage 等）は不要なら足さないこと。\n\n[install 手順の注意] 本リポジトリは package-lock.json を git 管理している。`rm -rf node_modules package-lock.json && npm install`（完全クリーン再構築）は npm 11.5.1 の arborist が上記 peer 競合で edgesOut クラッシュする。FEAT-001 の検証コマンドどおり、既存ロックファイルを残したまま `npm install`（増分）を使うこと。CI の `npm ci` はロックファイルから復元するため影響なし。vitest 選定とは独立の既存問題である点に注意。\n\nvitest.config.ts の方針: defineConfig（vitest/config）。test.environment='node'（Lambda 純ロジック + CDK 合成テスト + src/lib 純ロジックが対象、DOM 不要）。test.include=['amplify/**/*.test.ts','src/**/*.test.ts']（*.test.ts をプロダクションコードに併置）。resolve.alias で '@' をリポジトリルート（fileURLToPath(new URL('.', import.meta.url))）へ向ける（tsconfig の paths '@/*': ['./*'] と一致、vite-tsconfig-paths は未導入）。test.passWithNoTests=true を設定済み: FEAT-001 時点はテスト 0 件のため、これが無いと vitest は exit 1 となり CI の『テスト』ステップが落ちる。後続 FEAT が *.test.ts を追加していけば通常どおり件数が走る。\n\nCI（.github/workflows/ci.yml）: setup-node を node-version 22 に引き上げ、『型チェック』(npx tsc --noEmit) の後に『テスト』ステップ（run: npm run test）を追加。実機デプロイを伴う結合テストは含めない。\n\n検証結果（worktree, node v24.7.0 / npm 11.5.1 で実行）: npm install=成功 / npx vitest --run=exit 0（No test files found, passWithNoTests）/ npm run test=exit 0 / npm run lint=exit 0 / npx tsc --noEmit=exit 0（vitest.config.ts はルート tsconfig に含まれるが型エラー無し）。npm audit の既存脆弱性は本変更以前からのもので FEAT-001 のスコープ外。"
+}

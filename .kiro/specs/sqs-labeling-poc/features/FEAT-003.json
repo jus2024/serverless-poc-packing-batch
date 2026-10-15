@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "amplify/custom の L2 Construct 群と verification-config を実装し、backend.ts で SqsLabelingPoc ネストスタックとして配線する。CDK 合成テスト（Template.fromStack）で配線を検査する。FEAT-002 のハンドラ（resource.ts）に依存。各 Construct に要件番号・設計節を引用した詳細日本語 JSDoc（EC PoC の order-*.ts スタイル）を付す。design §3〜§10 / §16 合成テスト / 要件 2・5・6・7・8〜12。",
+  "status": "pending",
+  "steps": [
+    "amplify/custom/verification-config.ts: getVerificationConfig()（キャッシュ・1 度解決）と VerificationConfigError。§4.1 表の全キー（RELAY_MODE[pipes/lambda/both]・LABELING_MAX_CONCURRENCY[2〜1250]・LABELING_WORKER_BATCH_SIZE[1〜10]・ROUTER_BATCH_SIZE[1〜1000]・ROUTER_PARALLELIZATION_FACTOR[1〜10]・SEED_UNIT_COUNT_MAX[1〜5000]・BEST_BEFORE_DAYS[既定365,1〜3650]）解決・範囲検証。MaximumConcurrency 下限 2 を自前検証。許容外は全誤りをまとめて throw。verification-config.test.ts 併置（design §4.1/§9）。",
+    "amplify/custom/labeling-tables.ts（LabelingTables）: TableV2 で unit（unit_id PK・StreamViewType.NEW_IMAGE・GSI1 batch-units-index[batch_id/unit_id 射影ALL]・GSI2 lot-trace-index[lot_id/unit_id 射影ALL]）/ roast-batch（batch_id PK・Streams/GSI なし）、Billing.onDemand()・RemovalPolicy.DESTROY・物理名サフィックス（§3.3）。get unitStreamArn()（無効なら例外）・get tableEnvironment()（§4.2 のキー）を公開（design §3/§4.2）。",
+    "amplify/custom/labeling-functions.ts（LabelingFunctions）: seeder/router/worker/api を NodejsFunction（Node22・externalModules=['@aws-sdk/*']・NODE_OPTIONS='--enable-source-maps'）で束ね、テーブル環境変数と検証パラメータを注入。§6.5 IAM を PolicyStatement で手で絞る。wireSeederInvoke(api) で labeling-api に seeder の lambda:InvokeFunction（ARN 文字列限定）と環境変数を付与（design §6/§6.5）。",
+    "amplify/custom/labeling-api.ts（LabelingApi）: REST API（REGIONAL・ステージ poc・CORS GET/POST/OPTIONS+Content-Type/Authorization）に CognitoUserPoolsAuthorizer（props の userPool 参照）、§4.4 の 6 ルートを labeling-api に接続、OPTIONS 以外は AuthorizationType.COGNITO。get url() と urlForLambdaEnvironment を公開（design §4.4/§7）。",
+    "amplify/custom/labeling-stream.ts（LabelingStream）: SQS 標準キュー（SQS_MANAGED・enforceSSL・visibilityTimeout=360・DESTROY・DLQ maxReceiveCount=5）、方式 A-Pipes（CfnPipe source=unit Streams/target=SQS・filter eventName=INSERT・inputTemplate で §3.4 ペイロード[NewImage.unit_count 含む]射影・最小権限ロール）、方式 A-Lambda（router に DynamoEventSource・startingPosition=LATEST・INSERT フィルタ・batchSize/parallelizationFactor・reportBatchItemFailures/retryAttempts=3/bisectBatchOnError/SqsDlq）、worker ESM（SqsEventSource・maxConcurrency=LABELING_MAX_CONCURRENCY・batchSize・reportBatchItemFailures）。RELAY_MODE 分岐（pipes/lambda/both・both の二重配信冪等吸収）を JSDoc 明記（design §4.3/要件2・5・6）。",
+    "amplify/custom/labeling-monitoring.ts（LabelingMonitoring）: 単一ダッシュボード（粒度1分）。最上段 worker ConcurrentExecutions（24幅・MaxConcurrency/枠1000 注釈線）、§8.1 表のウィジェット（入口別 Invocations[AWS/Pipes と AWS/Lambda・both 分離不可注記]・SQS 深度・Throttles・IteratorAge・unit 書き込み容量/スロットル[基表+GSI2本]・DLQ 深度）。タイトル定数化・読み方ヘッダー（design §8.1/要件7）。",
+    "amplify/custom/labeling-alarms.ts（LabelingAlarms）: SNS トピック（enforceSSL・購読なし・get topicArn()）とアラーム（worker スロットル>0・アカウント同時実行80%・SQS/Streams DLQ メッセージ・SQS 深度高止まり）。閾値はダッシュボードと共有（design §8.2/要件7）。",
+    "amplify/backend.ts: defineBackend({auth,data}) に backend.createStack('SqsLabelingPoc')、getVerificationConfig() を 1 度解決して共有、LabelingTables→LabelingFunctions→LabelingApi(backend.auth.resources.userPool)→wireSeederInvoke→LabelingStream→LabelingMonitoring→LabelingAlarms を配線、backend.addOutput({custom:{labelingApiUrl,alarmTopicArn,relayMode,labelingMaxConcurrency}})。既存 auth/data(Todo,apiKey) は変更しない（design §10/要件12）。",
+    "amplify/custom/stack.test.ts: §16 合成テスト項目（ESM/Pipes の INSERT フィルタ固定・worker MaximumConcurrency が config 反映・SQS が SQS_MANAGED+enforceSSL+DESTROY・全 API ルートに Cognito オーソライザー/OPTIONS は NONE・可視性360秒・MaximumConcurrency=1 で合成失敗・全テーブル/キュー DESTROY・循環参照なし・合成/実行時キー名の突き合わせ）。"
+  ],
+  "acceptance_criteria": [
+    "npx vitest --run amplify/custom が全パスし、verification-config.test.ts と stack.test.ts の合成テストが design §16 の項目を検査する",
+    "backend.ts が SqsLabelingPoc ネストスタックに全リソースを置き、既存 auth/data を変更しない",
+    "各 Construct ファイルに要件番号・設計節を引用した日本語 JSDoc がある",
+    "npx tsc -p amplify/tsconfig.json --noEmit が型エラー無し",
+    "MaximumConcurrency=1 を与えると verification-config が合成を失敗させる（下限2の自前検証）ことがテストで確認できる"
+  ],
+  "verification": [
+    "npx vitest --run amplify/custom",
+    "npx tsc -p amplify/tsconfig.json --noEmit"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

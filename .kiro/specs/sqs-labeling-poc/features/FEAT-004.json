@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "src の検証フロント（画面 A〜D）を実装する。src/lib/labeling の API クライアント + 進捗算術、src/components/labeling の 4 画面 + ダッシュボード + ポーリングフック、トップページ page.tsx を検証ダッシュボードに置換。styling は CSS Modules + @aws-amplify/ui-react（design §11.1 の precedence 判断: ワークスペース steering 優先）。アクセシビリティはグローバル規約と同水準。FEAT-003 のデプロイ出力に実行時依存するが、型/lint/ユニットは独立検証可能。design §11 / 要件 8〜12.5。",
+  "status": "pending",
+  "steps": [
+    "src/lib/labeling/api.ts: ベース URL=NEXT_PUBLIC_LABELING_API_URL、Cognito ID トークン付与、型付き例外 LabelingApiFailure（kind: CONFIG/REQUEST/NETWORK/HTTP）、6 ルート関数 createBatch/listBatches/getBatch/startLabeling/listUnitsByBatch/listUnitsByLot/getConfig、# を含む batchId を encodeURIComponent でパス/クエリエンコード（design §4.4/MEDIUM-1）。",
+    "src/lib/labeling/progress.ts: 純関数（百分率・完了判定・ETA 概算・直近増分）。src/lib/labeling/types.ts: フロント用型。",
+    "src/lib/labeling/api.test.ts（ベース URL 解決・エラー分類・ID トークン付与[provider 差し替え]・# エンコード）と progress.test.ts（進捗率・完了判定・ETA）を併置（design §16）。",
+    "src/components/labeling/LabelingDashboard.tsx: 4 画面を常時マウント・hidden でタブ切替（タブ離脱でポーリングを止めない）・キーボード操作可能（design §11.1）。",
+    "src/components/labeling/BatchRegisterPanel.tsx（画面 A: item_id/lot_id/roast_date/unit_count 入力→POST /batches、label htmlFor/aria-invalid/aria-describedby/role=alert）。",
+    "src/components/labeling/BatchListPanel.tsx（画面 B: GET /batches[ROASTING_DONE] 一覧 + [付番開始]→POST /labeling-start、検証トリガー注記 要件9.4）。",
+    "src/components/labeling/ProgressMonitorPanel.tsx（画面 C: use-batch-polling で進捗バー labeled_count/unit_count・完了表示・CloudWatch ダッシュボードへのリンク誘導 決定4）。",
+    "src/components/labeling/UnitTracePanel.tsx（画面 D: batch/lot 照会→GET /units、結果テーブル status/best_before/qr_payload/labeled_at 要件11.3）。",
+    "src/components/labeling/use-batch-polling.ts（GET /batches/{id} を 1〜2 秒ポーリング・status=LABELED で停止）と use-batch-polling.test.ts（停止条件）。src/components/labeling/labeling.module.css（CSS Modules、focus-visible・最小タップ領域・レスポンシブ）。",
+    "src/app/page.tsx を LabelingDashboard をマウントするタブ構成の検証ダッシュボードに置換。トップのナビから /sample リンクを外す（sample ページ自体は残す。要件12.5/structure 方針）。認証は layout.tsx の AmplifyProvider(<Authenticator>) 配下で満たす。"
+  ],
+  "acceptance_criteria": [
+    "npx vitest --run src/lib/labeling と src/components/labeling が全パス（# エンコード・進捗算術・ポーリング停止条件を含む）",
+    "トップページ src/app/page.tsx が検証ダッシュボードに置換され /sample への導線が無い（sample ディレクトリは残る）",
+    "全入力・ボタンにアクセシビリティ属性（label 関連付け・aria-*・role=alert・focus-visible）がある",
+    "styling は CSS Modules + @aws-amplify/ui-react のみで新規 Tailwind/コンポーネントライブラリを導入していない",
+    "npm run lint と npx tsc --noEmit（ルート）が通る"
+  ],
+  "verification": [
+    "npx vitest --run src/lib/labeling src/components/labeling",
+    "npx tsc --noEmit",
+    "npm run lint"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

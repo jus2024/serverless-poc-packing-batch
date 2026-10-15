@@ -1,0 +1,29 @@
+{
+  "project_type": "AWS Amplify Gen 2 業務 Web アプリテンプレート（Next.js 15 App Router フロント + Amplify バックエンド）。本 PoC は amplify/custom の生 CDK L2 Construct + amplify/functions の Node.js Lambda + src の検証フロントを追加する。",
+  "language": "TypeScript（フロント・バックエンド共通）。Python は使わない（要件 12.6）。",
+  "build_system": "npm。フロントは Next.js（next build）。バックエンドは Amplify Gen 2（内部で CDK、npx ampx sandbox で合成/デプロイ）。amplify/ は ESM（amplify/package.json に type:module）、ルート tsconfig は amplify/ と agents/ を exclude し、amplify/tsconfig.json が別途 amplify を型チェックする。",
+  "test_framework": "vitest（本 PoC で新規導入。現状 package.json に未導入）。CDK 合成テストは aws-cdk-lib 同梱の aws-cdk-lib/assertions の Template を使う（追加依存不要）。副作用境界のモックは aws-sdk-client-mock(-jest)。",
+  "build_command": "npm run build（Next ビルド）/ npx tsc --noEmit（ルート型）/ npx tsc -p amplify/tsconfig.json --noEmit（amplify 型）",
+  "test_command": "npx vitest --run（全テスト）。狭い検証は npx vitest --run <path>。lint は npm run lint。",
+  "verification_instructions": "最も狭い検証を最初に（testing 方針）: 変更モジュールの vitest ユニットテスト → CDK 合成テスト（Template.fromStack）→ npx tsc --noEmit（ルート）と npx tsc -p amplify/tsconfig.json --noEmit（amplify）→ npm run lint。フロント変更は lint + 型チェックを優先。1,000 多重の実測(R5)と Pipes inputTemplate 文字列射影(NIT-1)は sandbox 実機でしか検証できず自動検証対象外。ローカルではフロント・バックエンド結合テスト不可（Cognito + API Gateway 必要）。",
+  "snapshot_or_generated_files": "amplify_outputs.json は ampx sandbox が生成する（コミット対象外・ローカル実行で生成）。本 PoC のコード自体に生成/スナップショットファイルは無い。",
+  "environment_constraints": "ampx sandbox に CDK context(--context) が届かないため、入口方式切替は環境変数 RELAY_MODE が唯一の経路。Lambda ランタイムは Node.js 22.x 確定、CI の setup-node も 22 に引き上げる。全追加リソースは RemovalPolicy.DESTROY。リージョン ap-northeast-1。DynamoDB は PAY_PER_REQUEST。シークレットをハードコードしない。既存 auth(Cognito)/data(Todo, apiKey) を変更・削除しない。",
+  "contribution_requirements": "AGENTS.md: feature ブランチで小さくスコープを絞る、無関係リファクタ禁止、IAM/CI/認証/デプロイ変更はレビュー必須。structure 方針: amplify/custom に L2 Construct、amplify/functions に Lambda、src にフロント、構成越境しない。新規機能はトップページ page.tsx に構築、sample はナビから外すが残す。security 方針: 最小権限・enforceSSL・SQS_MANAGED 暗号化。コミットはローカルで行い push しない。",
+  "key_patterns": "参考 EC PoC（serverless-poc-ec-site-ordering の order-*.ts / src/lib/orders / src/components/orders）のスタイルに忠実に揃える: amplify/custom の各 Construct に要件番号・設計節を引用した詳細日本語 JSDoc（なぜその設定か）。Lambda は handler.ts に副作用を閉じ純ロジックを隣接モジュール（to-message.ts / labeling.ts / routes.ts / seed-plan.ts）に分けて *.test.ts を併置。IAM は grant* を使わず PolicyStatement で手で絞る。フロントは CSS Modules + @aws-amplify/ui-react（design §11.1: ワークスペース steering がグローバル Tailwind steering より優先）。既存 sample/page.tsx のアクセシビリティ水準（label htmlFor / role=alert / aria-*）を踏襲。",
+  "relevant_files": [
+    "amplify/backend.ts （現状 defineBackend({auth,data}) のみ。createStack('SqsLabelingPoc') を足す）",
+    "amplify/auth/resource.ts, amplify/data/resource.ts （変更しない。userPool を LabelingApi が参照）",
+    "amplify/tsconfig.json （ESM/bundler, strict, $amplify/* paths）",
+    "amplify/package.json （type:module）",
+    "package.json （scripts に dev/build/start/lint のみ。test 系・vitest・@types/aws-lambda 未導入）",
+    "tsconfig.json （@/* エイリアス, amplify/agents を exclude）",
+    ".github/workflows/ci.yml （setup-node 20。22 に上げ npm run test を足す）",
+    "src/app/page.tsx （テンプレトップ。検証ダッシュボードに置換）",
+    "src/app/layout.tsx （AmplifyProvider で Authenticator ラップ済み）",
+    "src/lib/amplify/AmplifyProvider.tsx （configured フラグ・Authenticator）",
+    "src/app/sample/page.tsx （参照用に温存・ナビから外す。アクセシビリティ参考）",
+    "src/app/sample/sample.module.css （CSS Modules 参考）",
+    "src/app/page.module.css （CSS Modules 参考）"
+  ],
+  "directory_structure": "amplify/custom/（新規・L2 Construct: labeling-tables.ts, labeling-stream.ts, labeling-functions.ts, labeling-api.ts, labeling-monitoring.ts, labeling-alarms.ts, verification-config.ts + *.test.ts）, amplify/functions/（新規・seeder/ labeling-router/ labeling-worker/ labeling-api/ shared/ 各 handler.ts + 純ロジック + *.test.ts + resource.ts）, src/lib/labeling/（新規・api.ts progress.ts types.ts + *.test.ts）, src/components/labeling/（新規・LabelingDashboard + 4 パネル + use-batch-polling + labeling.module.css）, src/app/page.tsx（置換）, .github/workflows/ci.yml（更新）, README.md（更新）。"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "amplify/functions の shared/ 共通モジュールと 4 つの Lambda ハンドラ（seeder / labeling-router / labeling-worker / labeling-api）を実装する。純ロジックを隣接モジュールに分けて vitest ユニットテストを併置する（EC PoC スタイル）。FEAT-001 のテスト基盤に依存。FEAT-003 の Construct 配線がこのハンドラ群を参照する。design §3.4 / §6 / 要件 1〜5・8〜11 / R1〜R5。",
+  "status": "pending",
+  "steps": [
+    "shared/unit-keys.ts: buildUnitId(batchId, seq) を唯一の実装として作る（'UNIT#' + BATCH# 接頭辞を除いた本体 + '-' + String(seq).padStart(6,'0')、seq は 1 始まり）。batch_id/lot_id のパースヘルパも併置。shared/unit-keys.test.ts で seq=1→-000001, seq=1000→-001000, BATCH# 剥がし, 決定性を検証（design §3.4/§6.6）。",
+    "shared/types.ts: Unit/RoastBatch レコード型、SQS ペイロード型（unit_id/batch_id/lot_id/item_id/seq/unit_count/roast_date）、API 入出力型、status リテラル union（design §3/§3.4）。",
+    "shared/qr.ts: buildQrPayload({unit_id,item_id,best_before}) = JSON.stringify でキー順固定。shared/qr.test.ts で決定性・キー順を検証（design §6.3-2）。",
+    "shared/runtime-config.ts: 環境変数（テーブル名・GSI 名・Streams ARN・検証パラメータ）を解決、範囲外は RuntimeConfigError。キー名は design §4.2 の LABELING_* に揃える。shared/runtime-config.test.ts で範囲内外・不正値（design §4.1/§6.6/非機能5）。",
+    "shared/ddb.ts: DynamoDBDocumentClient シングルトン。shared/http.ts: ok/toErrorResponse({error,message,details?} と 400/401/404/409/500)/parseJsonBody/CORS ヘッダー（design §6.6/§13）。",
+    "seeder/: seed-plan.ts（純: unit_count 件生成・各 Unit に unit_count 非正規化・buildUnitId 採番・25 件チャンク化・UnprocessedItems 再送計画）、handler.ts（roast-batch GetItem→BatchWriteItem 指数バックオフ再送、状態遷移は持たない）、resource.ts（15 分/512MB/Node22）。seed-plan.test.ts 併置（design §6.1/要件1）。",
+    "labeling-router/: to-message.ts（純: Streams レコード→§3.4 ペイロード射影[NewImage.unit_count 含む]・INSERT 二次ガード・10 件チャンク化）、handler.ts（SendMessageBatch・reportBatchItemFailures）、resource.ts（5 分/256MB/Node22）。to-message.test.ts 併置（design §6.2/要件2.5）。",
+    "labeling-worker/: labeling.ts（純: best_before = roast_date + BEST_BEFORE_DAYS 日[UTC 暦日加算]・qr_payload[shared/qr]・付番 UpdateItem 式[attribute_not_exists(best_before)]・完了判定式[labeled_count=:n AND status=:labeling、:n=payload.unit_count 固定]）、handler.ts（unit UpdateItem→成功時 roast-batch ADD 1[UPDATED_NEW]→unit_count 到達で完了遷移・reportBatchItemFailures）、resource.ts（60 秒/256MB/Node22・reservedConcurrentExecutions 設定しない）。labeling.test.ts 併置（うるう年跨ぎ・条件式・完了判定。design §6.3/要件3〜5）。",
+    "labeling-api/: routes.ts（純: httpMethod+resource ルーティング・入力検証[§14 表: item_id/lot_id/roast_date/unit_count 既定1000、?status= 既定 ROASTING_DONE・許容3値・許容外400、?batchId=/?lotId= 排他]・POST /labeling-start の条件付き遷移[ROASTING_DONE→遷移+invoke / 既遷移→ConditionalCheckFailed→409・invoke しない]）、handler.ts（PutItem/Scan/GetItem/UpdateItem/GSI Query、seeder 非同期 invoke InvocationType=Event）、resource.ts（30 秒/256MB/Node22）。routes.test.ts 併置（ルーティング・入力検証・?status= 分岐・二重起動抑止。design §6.4/§4.4/要件8〜11）。"
+  ],
+  "acceptance_criteria": [
+    "npx vitest --run amplify/functions が全パスし、unit-keys/qr/runtime-config/seed-plan/to-message/labeling/routes の各テストが存在する",
+    "buildUnitId が shared/unit-keys.ts の唯一の実装で、seeder と router がこれを呼ぶ（重複実装が無い）",
+    "worker の完了判定が :n=payload.unit_count 固定で labeled_count=:n AND status=:labeling を組み立てる（追加 GetItem 無し）",
+    "labeling-api の POST /labeling-start が既遷移時に 409 を返し seeder を invoke しない分岐を持つ",
+    "npx tsc -p amplify/tsconfig.json --noEmit が型エラー無し"
+  ],
+  "verification": [
+    "npx vitest --run amplify/functions",
+    "npx tsc -p amplify/tsconfig.json --noEmit"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

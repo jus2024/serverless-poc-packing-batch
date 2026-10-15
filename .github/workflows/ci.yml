@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: 依存関係のインストール
@@ -36,3 +36,6 @@ jobs:
 
       - name: 型チェック
         run: npx tsc --noEmit
+
+      - name: テスト
+        run: npm run test

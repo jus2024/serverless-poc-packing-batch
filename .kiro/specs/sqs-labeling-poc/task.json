@@ -1,0 +1,7 @@
+{
+  "task_id": "task-sqs-labeling-poc",
+  "task_description": "Amplify Gen 2 テンプレート上に、DynamoDB Streams → SQS ファンアウトで付番ワーカー Lambda を最大 1,000 多重まで張り付かせる PoC を構築する。amplify/custom の L2 Construct 群、amplify/functions の Lambda ハンドラ + shared、backend.ts のネストスタック配線、src の検証ダッシュボード 4 画面、vitest テスト基盤 + CI node22 引き上げ、README を実装する。承認済み design.md / requirements.md(R1〜R5) に忠実に従う。",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
+  "blocked_reason": null
+}
