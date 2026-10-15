@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "docs",
   "description": "README.md を本 PoC 向けに更新する。構成図テキスト・セットアップ・検証シナリオ・クリーンアップ・デプロイ影響を記載。FEAT-001〜004 の成果物を前提に書く（最後に行う）。design §17 / 要件12 / repo-workflow 方針。",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "README.md に構成図テキスト（design §2.1 の全体像: 画面 A〜D → API Gateway → seeder/Streams → Pipes/router → SQS → worker → DynamoDB、可観測性）を追記する。",
     "セットアップ手順（npm install → npx ampx sandbox、amplify_outputs.json の custom.labelingApiUrl を .env.local の NEXT_PUBLIC_LABELING_API_URL に写す）を記載する。",

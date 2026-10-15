@@ -34,6 +34,128 @@ docs/                   # 詳細ドキュメント
 
 ---
 
+## SQS 付番バッチ処理 PoC（Streams → SQS ファンアウト・最大 1,000 多重）
+
+Kiro Roasters の「焙煎後の梱包バッチ処理」を題材に、DynamoDB Streams に滞留した
+約 1,000 個の個体を SQS でファンアウトし、`labeling-worker` を最大 1,000 多重で立ち上げて
+一斉に付番する検証環境です。入口（Streams → SQS の中継）がボトルネックにならないか、
+`MaximumConcurrency` まで本当に張り付くかを観測します。
+
+本 PoC のリソースは既存の auth（Cognito）/ data（Todo）とは別のネストスタック
+`SqsLabelingPoc` に分離して共存します。既存の Todo / サンプルページは変更・削除しません。
+
+### 構成図（design §2.1 全体像）
+
+```
+[画面 A] バッチ登録 ──PutItem──▶ kiro-roasters-roast-batch (Streams なし)
+                                        ▲ labeled_count 加算 / 完了遷移
+[画面 B] 付番開始 ──POST /batches/{id}/labeling-start──▶ labeling-api
+                       └─条件付き遷移 ROASTING_DONE→LABELING（同期・二重起動抑止）
+                       └─(条件成功時のみ非同期 invoke 202)─▶ seeder ──BatchWriteItem×40──▶ kiro-roasters-unit
+                                                                                   │ Streams(NEW_IMAGE, INSERT)
+                                     ┌─────────────────────────────────────────────┤
+                                     │ RELAY_MODE=pipes            RELAY_MODE=lambda │
+                                     ▼                                              ▼
+                          EventBridge Pipes (filter INSERT)        labeling-router (ESM, INSERT ガード)
+                                     │  SendMessage                        │ SendMessageBatch
+                                     └──────────────▶ kiro-roasters-labeling (SQS 標準) ◀────┘
+                                                            │ SqsEventSource(MaximumConcurrency=1000)
+                                                            ▼
+                                                   labeling-worker ──UpdateItem(条件付き)──▶ kiro-roasters-unit
+                                                            └──ADD labeled_count / 完了遷移──▶ roast-batch
+[画面 C] 進捗モニタ ──GET /batches/{id}──(1〜2秒ポーリング)──▶ labeling-api (roast-batch 読み取り)
+[画面 D] トレース照会 ──GET /units?batchId= / ?lotId=──▶ labeling-api (GSI Query)
+
+可観測性: CloudWatch Dashboard / Alarms / SNS（labeling-worker の ConcurrentExecutions 等）
+```
+
+- 入口は `RELAY_MODE` で `pipes`（EventBridge Pipes）/ `lambda`（labeling-router）/ `both`（両方）を選びます。
+- `both` の二重配信は worker の冪等条件（§6.3 の条件付き UpdateItem）で吸収され、`labeled_count` も二重加算されません。
+- 画面 A〜D はトップページ（`src/app/page.tsx`）のタブ構成ダッシュボードです。
+
+### セットアップ
+
+```bash
+# 1. 依存をインストール
+npm install
+
+# 2. Amplify sandbox を起動（SqsLabelingPoc スタックを合成・デプロイ）
+npx ampx sandbox
+```
+
+`npx ampx sandbox` が生成する `amplify_outputs.json` の `custom.labelingApiUrl`（API Gateway の
+エンドポイント）を、フロントの環境変数 `NEXT_PUBLIC_LABELING_API_URL` に写します。
+
+```bash
+# .env.local に API エンドポイントを設定（値は amplify_outputs.json の custom.labelingApiUrl）
+# NEXT_PUBLIC_LABELING_API_URL=https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com/prod
+```
+
+```bash
+# 3. 開発サーバーを起動
+npm run dev
+```
+
+> `amplify_outputs.json` は sandbox が生成するローカルファイルでコミット対象外です。
+> `.env.local` も同様にコミットしません（シークレットや環境固有値をリポジトリに含めない）。
+
+### 検証シナリオ（design §17）
+
+1. `RELAY_MODE` を選んで `npx ampx sandbox`（まず合成が通ることを確認する）。
+2. 画面 A で RoastBatch を 1 件登録する（`unit_count≈1000`、`status=ROASTING_DONE`）。
+3. 画面 B で [付番開始] → seeder が非同期起動（即 202）→ 約 1,000 件が PENDING で INSERT →
+   `status=LABELING` に遷移する。
+4. Streams（INSERT）→ 入口（pipes/lambda）→ SQS → worker が多重起動する。
+   CloudWatch ダッシュボードで worker の `ConcurrentExecutions` が `MaximumConcurrency`
+   付近に張り付くことを観測する（R5）。
+
+   **Pipes の文字列射影を実機で突き合わせる 3 境界ケース（design-review NIT-1）:**
+   `RELAY_MODE=pipes` / `both` のとき、Pipes `inputTemplate` が組み立てた `unit_id` が
+   `buildUnitId`（§3.4）と完全一致することを、SQS 受信メッセージ（または worker ログ）で
+   以下 3 ケース突き合わせる。
+   - `seq=1` → サフィックスが `-000001`（ゼロ埋め先頭）
+   - `seq=unit_count` → サフィックスが桁境界（例 `-001000`）
+   - `BATCH#` を剥がした本体部分が一致（`unit_id` の衝突・不一致が無い＝ worker の冪等条件が効く）
+
+   あわせて SQS 受信ペイロードの `unit_count` が JSON の数値（Number）のまま保たれていること
+   （文字列化されると worker の `labeled_count = :n` 比較で型不一致になり得る）を確認する。
+5. 画面 C で `labeled_count/unit_count` が増え、達成で `status=LABELED`・`labeling_finished_at` が確定する。
+6. 画面 D で batch / lot から Unit をトレースする（`best_before` / `qr_payload` / `labeled_at`）。
+7. `RELAY_MODE` を変えて再デプロイし、入口方式の立ち上がりカーブを比較する（R5 / 要件 5.5）。
+8. 複数バッチ同時は 2〜4 を複数バッチで相次いで実行する（決定 5）。
+9. 検証後は sandbox 削除で `SqsLabelingPoc` スタックごと一括破棄する（既存 Todo は温存）。
+
+> 1,000 多重の張り付き（R5）と Pipes `inputTemplate` の文字列射影（NIT-1）は、
+> sandbox 実機でしか確認できません（ローカル / CI の自動テスト対象外）。
+
+### クリーンアップ
+
+```bash
+npx ampx sandbox delete
+```
+
+sandbox 削除で本 PoC のネストスタック `SqsLabelingPoc`（Unit / RoastBatch テーブル、SQS、
+Lambda、Pipes、ダッシュボード、アラーム）が一括破棄されます（全リソース `RemovalPolicy.DESTROY`）。
+既存の auth（Cognito）/ data（Todo）は別スタックのため温存されます。
+
+### デプロイ影響
+
+- **CI のみに影響し、Amplify Hosting / AgentCore には波及しません。** 本 PoC では CI の
+  `setup-node` を Node.js 22 に引き上げ（Lambda ランタイム 22.x と揃える）、vitest による
+  テスト実行を CI に追加します。Web アプリのホスティングやエージェント実行基盤の構成は変わりません。
+- **`RELAY_MODE` の切替は再デプロイが必要です。** `ampx sandbox` には CDK context が届かないため、
+  入口方式の切替は環境変数 `RELAY_MODE`（`pipes` / `lambda` / `both`）が唯一の経路で、
+  合成時に入口を決めます。値を変えたら `npx ampx sandbox` を再実行して反映します。
+  - `pipes`: EventBridge Pipes が Streams → SQS を中継する
+  - `lambda`: labeling-router（Lambda）が Streams → SQS を中継する
+  - `both`: 両方を有効化する（二重配信は worker の冪等条件で吸収）
+- **seeder 失敗時の縮退挙動（design-review NIT-2）:** seeder が上限リトライを超過し一部 Unit を
+  INSERT できなかった場合、`labeled_count` は `unit_count` に到達せず完了遷移は成立しません。
+  画面 C は未完了のまま（キュー深度ではなく `labeled_count` 基準の正しい挙動）になります。
+  再試行は batch を作り直してください。張り付きカーブの観測自体は取得できます。
+
+---
+
 ## クイックスタート
 
 ### Web アプリを動かす（全員共通、5 分）
