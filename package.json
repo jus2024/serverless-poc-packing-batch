@@ -28,21 +28,25 @@
   "devDependencies": {
     "@aws-amplify/backend": "^1.21.1",
     "@aws-amplify/backend-cli": "^1.8.2",
+    "@aws-sdk/client-dynamodb": "3.1014.0",
+    "@aws-sdk/client-lambda": "3.1014.0",
+    "@aws-sdk/client-sqs": "3.1014.0",
+    "@aws-sdk/lib-dynamodb": "3.1014.0",
     "@eslint/eslintrc": "^3.3.5",
+    "@types/aws-lambda": "8.10.164",
     "@types/node": "^22.19.15",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "aws-cdk": "^2",
     "aws-cdk-lib": "^2",
+    "aws-sdk-client-mock": "4.1.0",
+    "aws-sdk-client-mock-jest": "4.1.0",
     "constructs": "^10.3.0",
     "esbuild": "^0.27.4",
     "eslint": "^9.39.4",
     "eslint-config-next": "^15.5.14",
     "tsx": "^4.19.0",
     "typescript": "^5.9.3",
-    "vitest": "3.2.7",
-    "@types/aws-lambda": "8.10.164",
-    "aws-sdk-client-mock": "4.1.0",
-    "aws-sdk-client-mock-jest": "4.1.0"
+    "vitest": "3.2.7"
   }
 }
