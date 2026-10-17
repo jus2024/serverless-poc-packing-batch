@@ -182,11 +182,30 @@ function requireBatchIdPath(
   pathParameters: Record<string, string | undefined> | null | undefined,
 ): string {
   const raw = pathParameters?.batchId;
-  // API Gateway がデコード済みの batchId をそのまま使う（design §4.4 / MEDIUM-1）
   if (raw === undefined || raw.trim() === "") {
     throw new HttpError(400, "BadRequest", "batchId path parameter is required");
   }
-  return ensureBatchId(raw);
+  // batch_id は `BATCH#...` で `#` を含む。フロントは encodeURIComponent で送るが
+  // （MEDIUM-1）、API Gateway（REST + Lambda プロキシ）は pathParameters を
+  // **デコードせず** に渡す。そのまま使うと `BATCH%23...` が `BATCH#` 接頭辞判定に
+  // 引っかからず ensureBatchId が `BATCH#` を二重付与し、存在しないキーで 404 になる
+  // （実機で判明。設計の「API GW がデコード済み」前提は誤り）。ここで decodeURIComponent
+  // する。既にデコード済み（`%` を含まない）の値をデコードしても不変なので二重デコードに
+  // ならない。不正なエスケープ列は 400 に写す。
+  return ensureBatchId(decodePathValue(raw.trim(), "batchId"));
+}
+
+/**
+ * パスパラメータを percent-decode する。API Gateway がデコードしていてもしていなくても
+ * 正しい値になる（デコード済みの値は不変）。不正なエスケープ列（`decodeURIComponent` が
+ * 投げる `URIError`）は 400 に写す。
+ */
+function decodePathValue(raw: string, label: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new HttpError(400, "BadRequest", `${label} is not a valid URI component`);
+  }
 }
 
 function validateListUnits(
@@ -204,9 +223,20 @@ function validateListUnits(
       "exactly one of batchId or lotId is required",
     );
   }
+  // クエリ値も防御的に decode する（API Gateway はクエリをデコードして渡すが、
+  // 万一エンコード済みで届いても ensureBatchId/ensureLotId の接頭辞二重付与を避ける）。
+  // decodeURIComponent はデコード済み値に対しては不変。
   return hasBatch
-    ? { kind: "listUnits", by: "batch", value: ensureBatchId(batchId as string) }
-    : { kind: "listUnits", by: "lot", value: ensureLotId(lotId as string) };
+    ? {
+        kind: "listUnits",
+        by: "batch",
+        value: ensureBatchId(decodePathValue(batchId as string, "batchId")),
+      }
+    : {
+        kind: "listUnits",
+        by: "lot",
+        value: ensureLotId(decodePathValue(lotId as string, "lotId")),
+      };
 }
 
 /**

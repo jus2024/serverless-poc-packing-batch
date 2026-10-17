@@ -156,6 +156,26 @@ describe("routeRequest: GET /batches/{batchId}（画面 C）", () => {
       }),
     ).toThrowError(expect.objectContaining({ statusCode: 400 }));
   });
+
+  it("percent-encoded な batchId（%23 = #）をデコードし二重接頭辞にしない（実機回帰）", () => {
+    // API Gateway がパスパラメータをデコードせず BATCH%232026-... を渡しても、
+    // ensureBatchId が BATCH# を二重付与して存在しないキーで 404 になってはいけない。
+    const action = routeRequest({
+      httpMethod: "GET",
+      resource: "/batches/{batchId}",
+      pathParameters: { batchId: "BATCH%232026-10-09-AM-01" },
+    });
+    expect(action).toEqual({ kind: "getBatch", batch_id: "BATCH#2026-10-09-AM-01" });
+  });
+
+  it("既にデコード済みの batchId をデコードしても不変（二重デコードしない）", () => {
+    const action = routeRequest({
+      httpMethod: "GET",
+      resource: "/batches/{batchId}",
+      pathParameters: { batchId: "BATCH#2026-10-09-AM-01" },
+    });
+    expect(action).toEqual({ kind: "getBatch", batch_id: "BATCH#2026-10-09-AM-01" });
+  });
 });
 
 describe("routeRequest: POST /labeling-start（二重起動抑止・画面 B）", () => {
@@ -164,6 +184,18 @@ describe("routeRequest: POST /labeling-start（二重起動抑止・画面 B）"
       httpMethod: "POST",
       resource: "/batches/{batchId}/labeling-start",
       pathParameters: { batchId: "BATCH#2026-10-09-AM-01" },
+    });
+    expect(action).toEqual({
+      kind: "startLabeling",
+      batch_id: "BATCH#2026-10-09-AM-01",
+    });
+  });
+
+  it("percent-encoded な batchId をデコードして startLabeling にする（実機回帰）", () => {
+    const action = routeRequest({
+      httpMethod: "POST",
+      resource: "/batches/{batchId}/labeling-start",
+      pathParameters: { batchId: "BATCH%232026-10-09-AM-01" },
     });
     expect(action).toEqual({
       kind: "startLabeling",
