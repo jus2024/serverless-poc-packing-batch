@@ -71,6 +71,20 @@ export const PIPES_INSERT_FILTER_PATTERN = JSON.stringify({
 });
 
 /**
+ * ターゲットが SQS のときの EventBridge Pipes の source `batchSize` 上限。
+ *
+ * Pipes は source（DynamoDB Streams）から読んだレコードを 1 バッチ単位で target へ渡す。
+ * target が SQS の場合、Pipes は内部的に `SendMessageBatch`（1 回最大 10 件）で送るため、
+ * source の `batchSize` も **10 以下**でなければならない。11 以上を指定すると Pipes の作成が
+ * `The configured batch size N is greater than the max supported batch size 10 for target sqs`
+ * で失敗する（CloudFormation デプロイ時に判明。合成では検出されない）。
+ *
+ * source=Streams 単体なら 10,000 まで許されるが、ここでは target=SQS の制約が律速になる。
+ * 滞留分を 1 レコード = 1 メッセージで小刻みに流す方針（§4.3.2）に影響はない。
+ */
+export const PIPES_SQS_TARGET_MAX_BATCH_SIZE = 10;
+
+/**
  * Streams ESM の再試行回数の上限（design §4.3.3）。
  * 既定の -1（無限）だと恒久的に失敗する 1 レコードがシャードを塞ぎ後続も進めない。
  * 有限にして詰まりを打ち切る。
@@ -259,7 +273,13 @@ export class LabelingStream extends Construct {
       sourceParameters: {
         dynamoDbStreamParameters: {
           startingPosition: StartingPosition.LATEST,
-          batchSize: 100,
+          // ターゲットが SQS のとき Pipes の batchSize 上限は 10（SQS SendMessageBatch の
+          // 1 回あたり上限 10 件に合わせる）。11 以上を指定すると Pipes 作成が
+          // "batch size N is greater than the max supported batch size 10 for target sqs"
+          // で失敗する。source=DynamoDB Streams 自体は 10,000 まで許すが、ここは
+          // target=SQS の制約が律速になるため 10 に固定する。
+          // 1 レコード = 1 メッセージの転送方針（§4.3.2）は維持される（滞留分を小刻みに流すだけ）。
+          batchSize: PIPES_SQS_TARGET_MAX_BATCH_SIZE,
         },
         // eventName=INSERT のみ届ける（要件 2.4。構造として固定）
         filterCriteria: {

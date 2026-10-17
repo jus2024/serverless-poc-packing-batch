@@ -8,6 +8,7 @@ import { LabelingApi, LABELING_API_ROUTES } from "./labeling-api.js";
 import {
   LabelingStream,
   PIPES_INSERT_FILTER_PATTERN,
+  PIPES_SQS_TARGET_MAX_BATCH_SIZE,
   QUEUE_VISIBILITY_TIMEOUT,
 } from "./labeling-stream.js";
 import { LabelingMonitoring } from "./labeling-monitoring.js";
@@ -107,6 +108,21 @@ describe("LabelingStream — 入口と worker ESM", () => {
     template.hasResourceProperties("AWS::Pipes::Pipe", {
       TargetParameters: {
         InputTemplate: Match.stringLikeRegexp("NewImage\\.unit_count"),
+      },
+    });
+  });
+
+  it("Pipes の source batchSize が SQS ターゲット上限 10 以下（デプロイ失敗の回帰防止）", () => {
+    // target が SQS の Pipes は batchSize > 10 で作成に失敗する
+    // （"batch size N is greater than the max supported batch size 10 for target sqs"）。
+    // 合成では検出されずデプロイ時に初めて落ちるため、ここで固定して回帰を防ぐ。
+    expect(PIPES_SQS_TARGET_MAX_BATCH_SIZE).toBeLessThanOrEqual(10);
+    const { template } = buildStack({ relayMode: "pipes" });
+    template.hasResourceProperties("AWS::Pipes::Pipe", {
+      SourceParameters: {
+        DynamoDBStreamParameters: {
+          BatchSize: PIPES_SQS_TARGET_MAX_BATCH_SIZE,
+        },
       },
     });
   });
