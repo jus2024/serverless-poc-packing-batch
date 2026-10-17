@@ -70,6 +70,15 @@
   display: block;
 }
 
+/*
+ * `.panel` のクラスセレクタ（詳細度 0,1,0）が UA の `[hidden]{display:none}`（詳細度 0,0,0）を
+ * 上書きしてしまい、hidden 属性を付けても全パネルが表示されてしまう（タブ切替が効かない原因）。
+ * 同じ詳細度で display:none を明示して hidden を効かせる。
+ */
+.panel[hidden] {
+  display: none;
+}
+
 /* ─── パネル共通 ───────────────────────────────────────── */
 
 .panelTitle {
