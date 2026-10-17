@@ -17,7 +17,7 @@ import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
 import type { SQSEvent, SQSBatchResponse, SQSRecord } from "aws-lambda";
 import { getDocClient } from "../shared/ddb.js";
 import {
-  resolveTableConfig,
+  resolveTableNames,
   resolveVerificationConfig,
 } from "../shared/runtime-config.js";
 import type { LabelingMessagePayload } from "../shared/types.js";
@@ -37,7 +37,7 @@ function parsePayload(record: SQSRecord): LabelingMessagePayload {
 }
 
 export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
-  const tables = resolveTableConfig();
+  const tables = resolveTableNames();
   const { bestBeforeDays } = resolveVerificationConfig();
   const client = getDocClient();
   const batchItemFailures: { itemIdentifier: string }[] = [];

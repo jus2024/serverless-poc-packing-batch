@@ -16,7 +16,7 @@
 import { GetCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { getDocClient } from "../shared/ddb.js";
 import {
-  resolveTableConfig,
+  resolveTableNames,
   resolveVerificationConfig,
   RuntimeConfigError,
 } from "../shared/runtime-config.js";
@@ -69,7 +69,7 @@ export const handler = async (event: {
     throw new Error("seeder: event.batch_id is required");
   }
 
-  const tables = resolveTableConfig();
+  const tables = resolveTableNames();
   const { seedUnitCountMax } = resolveVerificationConfig();
   const client = getDocClient();
 

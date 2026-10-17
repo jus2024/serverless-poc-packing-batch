@@ -85,18 +85,36 @@ function resolveIntInRange(
   return n;
 }
 
-/** テーブル / GSI / Streams の名前解決（design §4.2）。 */
-export interface TableConfig {
+/**
+ * テーブル名だけの解決（GSI 名を要求しない）。seeder / worker 用。
+ *
+ * seeder（BatchWriteItem/PutItem/GetItem）と worker（UpdateItem）は GSI を参照しないため、
+ * 合成側（`labeling-functions.ts`）も GSI 名の環境変数を**注入していない**（最小権限）。
+ * これらのハンドラが GSI 名まで要求する `resolveTableConfig()` を呼ぶと、
+ * `LABELING_BATCH_UNITS_INDEX_NAME is missing` で実行時にクラッシュする（実機で判明）。
+ * GSI を使うのは labeling-api（`GET /units` の Query）だけなので、用途別に分ける。
+ */
+export interface TableNames {
   unitTableName: string;
   roastBatchTableName: string;
+}
+
+export function resolveTableNames(env: EnvSource = process.env): TableNames {
+  return {
+    unitTableName: requireString(env, ENV_KEYS.UNIT_TABLE_NAME),
+    roastBatchTableName: requireString(env, ENV_KEYS.ROAST_BATCH_TABLE_NAME),
+  };
+}
+
+/** テーブル / GSI の名前解決（design §4.2）。GSI を使う labeling-api 専用。 */
+export interface TableConfig extends TableNames {
   batchUnitsIndexName: string;
   lotTraceIndexName: string;
 }
 
 export function resolveTableConfig(env: EnvSource = process.env): TableConfig {
   return {
-    unitTableName: requireString(env, ENV_KEYS.UNIT_TABLE_NAME),
-    roastBatchTableName: requireString(env, ENV_KEYS.ROAST_BATCH_TABLE_NAME),
+    ...resolveTableNames(env),
     batchUnitsIndexName: requireString(env, ENV_KEYS.BATCH_UNITS_INDEX_NAME),
     lotTraceIndexName: requireString(env, ENV_KEYS.LOT_TRACE_INDEX_NAME),
   };

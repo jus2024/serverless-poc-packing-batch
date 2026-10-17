@@ -3,6 +3,7 @@ import {
   ENV_KEYS,
   RuntimeConfigError,
   resolveTableConfig,
+  resolveTableNames,
   resolveVerificationConfig,
   BEST_BEFORE_DAYS_DEFAULT,
   SEED_UNIT_COUNT_MAX_DEFAULT,
@@ -38,6 +39,28 @@ describe("resolveTableConfig", () => {
   it("空文字は欠落として扱い RuntimeConfigError", () => {
     expect(() =>
       resolveTableConfig({ ...fullTableEnv, [ENV_KEYS.UNIT_TABLE_NAME]: "" }),
+    ).toThrow(RuntimeConfigError);
+  });
+});
+
+describe("resolveTableNames（seeder / worker 用。GSI 名を要求しない）", () => {
+  // seeder / worker には GSI 名の環境変数が注入されない（最小権限。labeling-functions.ts）。
+  // GSI 名が無くてもテーブル名だけで解決できることを固定する（実機の seeder クラッシュ回帰）。
+  it("GSI 名が無くてもテーブル名だけで解決する", () => {
+    expect(
+      resolveTableNames({
+        [ENV_KEYS.UNIT_TABLE_NAME]: "kiro-roasters-unit-ab12cd34",
+        [ENV_KEYS.ROAST_BATCH_TABLE_NAME]: "kiro-roasters-roast-batch-ab12cd34",
+      }),
+    ).toEqual({
+      unitTableName: "kiro-roasters-unit-ab12cd34",
+      roastBatchTableName: "kiro-roasters-roast-batch-ab12cd34",
+    });
+  });
+
+  it("テーブル名の欠落は RuntimeConfigError", () => {
+    expect(() =>
+      resolveTableNames({ [ENV_KEYS.UNIT_TABLE_NAME]: "only-unit" }),
     ).toThrow(RuntimeConfigError);
   });
 });
