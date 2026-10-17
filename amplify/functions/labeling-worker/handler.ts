@@ -28,12 +28,53 @@ import {
   buildCompletionUpdate,
 } from "./labeling.js";
 
-function parsePayload(record: SQSRecord): LabelingMessagePayload {
-  const p = JSON.parse(record.body) as LabelingMessagePayload;
-  if (!p.unit_id || !p.batch_id || typeof p.unit_count !== "number") {
-    throw new Error("labeling-worker: invalid message payload");
+/**
+ * 数値フィールドを number に正規化する。
+ *
+ * 入口が 2 系統あり、`seq` / `unit_count` の型が揃わない:
+ * - 方式 A-Lambda（router）: `SendMessageBatch` で JSON をそのまま送るため number。
+ * - 方式 A-Pipes: `inputTemplate` が DynamoDB Streams の `.N`（**文字列**）を
+ *   `<$.dynamodb.NewImage.unit_count.N>` で射影するため、SQS には**文字列**で届く
+ *   （NIT-1 で実機未検証とされていた点。実機で文字列と確認）。
+ * どちらでも動くよう number / 数値文字列の両方を受理し、それ以外は null を返す。
+ */
+function toNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
   }
-  return p;
+  return null;
+}
+
+export function parsePayload(record: SQSRecord): LabelingMessagePayload {
+  const p = JSON.parse(record.body) as Record<string, unknown>;
+  const unit_count = toNumber(p.unit_count);
+  const seq = toNumber(p.seq);
+  if (
+    typeof p.unit_id !== "string" ||
+    p.unit_id === "" ||
+    typeof p.batch_id !== "string" ||
+    p.batch_id === "" ||
+    unit_count === null ||
+    seq === null
+  ) {
+    // 入口（Pipes/router）がペイロードを壊した場合に型・値をログに残す（原因追跡用）。
+    throw new Error(
+      `labeling-worker: invalid message payload (unit_id=${String(p.unit_id)}, ` +
+        `batch_id=${String(p.batch_id)}, unit_count=${JSON.stringify(p.unit_count)}, ` +
+        `seq=${JSON.stringify(p.seq)})`,
+    );
+  }
+  return {
+    unit_id: p.unit_id,
+    batch_id: p.batch_id,
+    lot_id: typeof p.lot_id === "string" ? p.lot_id : "",
+    item_id: typeof p.item_id === "string" ? p.item_id : "",
+    seq,
+    unit_count,
+    roast_date: typeof p.roast_date === "string" ? p.roast_date : "",
+  };
 }
 
 export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
@@ -110,8 +151,13 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
           }
         }
       }
-    } catch {
-      // 5. 付番条件以外の失敗（スロットル・一時障害・解釈不能）は再試行対象に報告（要件 3.9）
+    } catch (err) {
+      // 5. 付番条件以外の失敗（スロットル・一時障害・解釈不能）は再試行対象に報告（要件 3.9）。
+      // 原因をログに残す（黙って握りつぶすと「全件 NotVisible のまま進まない」が診断できない）。
+      console.error(
+        `labeling-worker: record ${record.messageId} failed`,
+        err instanceof Error ? err.message : String(err),
+      );
       batchItemFailures.push({ itemIdentifier: record.messageId });
     }
   }
