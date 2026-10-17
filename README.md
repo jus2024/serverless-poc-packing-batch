@@ -216,6 +216,13 @@ Lambda、Pipes、ダッシュボード、アラーム）が一括破棄されま
   - `pipes`: EventBridge Pipes が Streams → SQS を中継する
   - `lambda`: labeling-router（Lambda）が Streams → SQS を中継する
   - `both`: 両方を有効化する（二重配信は worker の冪等条件で吸収）
+- **`PROCESSING_TIME_MS`（worker の擬似処理時間、ミリ秒。既定 0）で 1000 多重の立ち上げを制御します。**
+  worker は本来 1 件 ~80ms で終わるため、1 バッチ程度では SQS→Lambda のスケール（1 分あたり
+  最大 60 インスタンス増）が立ち上がる前にキューが枯れ、`ConcurrentExecutions` が 1,000 に届きません。
+  付番後に擬似 sleep を入れて 1 件の処理時間を延ばすと、リトルの法則（同時実行 ≒ 到着レート × 処理時間）で
+  同じ件数でも多重度を押し上げられます。R5 / T1（1000 到達までのカーブ）の観測では
+  `PROCESSING_TIME_MS=3000` 程度に設定し、`unit_count` を上限近く（または複数バッチ）で投入します。
+  値は環境変数なので変更には再デプロイが必要です（`GET /config` で実デプロイ値を確認できます）。
 - **seeder 失敗時の縮退挙動:** seeder が上限リトライを超過し一部 Unit を INSERT できなかった場合、
   `labeled_count` は `unit_count` に到達せず完了遷移は成立しません。画面 C は未完了のまま
   （キュー深度ではなく `labeled_count` 基準の正しい挙動）になります。再試行は batch を作り直してください。

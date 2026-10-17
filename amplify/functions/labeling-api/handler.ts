@@ -209,6 +209,7 @@ async function execute(action: RouteAction): Promise<APIGatewayProxyResult> {
       return ok({
         bestBeforeDays: verification.bestBeforeDays,
         seedUnitCountMax: verification.seedUnitCountMax,
+        processingTimeMs: verification.processingTimeMs,
         relayMode: process.env[ENV_KEYS.RELAY_MODE] ?? "pipes",
         labelingMaxConcurrency:
           process.env[ENV_KEYS.LABELING_MAX_CONCURRENCY] ?? "1000",

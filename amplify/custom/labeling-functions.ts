@@ -198,6 +198,8 @@ export class LabelingFunctions extends Construct {
         [envKeys.unitTableName]: tableEnv[envKeys.unitTableName],
         [envKeys.roastBatchTableName]: tableEnv[envKeys.roastBatchTableName],
         BEST_BEFORE_DAYS: String(config.bestBeforeDays),
+        // 擬似処理時間（R5 / T1 観測用。既定 0 では本来の挙動）
+        PROCESSING_TIME_MS: String(config.processingTimeMs),
       },
       // reservedConcurrentExecutions は設定しない（design §6 / R5）
     });
@@ -223,6 +225,8 @@ export class LabelingFunctions extends Construct {
         LABELING_MAX_CONCURRENCY: String(config.labelingMaxConcurrency),
         BEST_BEFORE_DAYS: String(config.bestBeforeDays),
         SEED_UNIT_COUNT_MAX: String(config.seedUnitCountMax),
+        // GET /config が worker の実値を正しく報告するため（計測条件の取り違え防止）
+        PROCESSING_TIME_MS: String(config.processingTimeMs),
       },
     });
 

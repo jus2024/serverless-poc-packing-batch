@@ -36,6 +36,8 @@ export const ENV_KEYS = {
   SEED_UNIT_COUNT_MAX: "SEED_UNIT_COUNT_MAX",
   RELAY_MODE: "RELAY_MODE",
   LABELING_MAX_CONCURRENCY: "LABELING_MAX_CONCURRENCY",
+  // worker の擬似処理時間（R5 / T1 観測用。既定 0）
+  PROCESSING_TIME_MS: "PROCESSING_TIME_MS",
 } as const;
 
 /** 検証パラメータの既定・範囲（design §4.1 の表。実行時側で使う分のみ）。 */
@@ -46,6 +48,11 @@ export const BEST_BEFORE_DAYS_MAX = 3650;
 export const SEED_UNIT_COUNT_MAX_DEFAULT = 1200;
 export const SEED_UNIT_COUNT_MAX_MIN = 1;
 export const SEED_UNIT_COUNT_MAX_MAX = 5000;
+
+/** worker の擬似処理時間（ミリ秒）。既定 0（本来の挙動）。上限は worker タイムアウト内。 */
+export const PROCESSING_TIME_MS_DEFAULT = 0;
+export const PROCESSING_TIME_MS_MIN = 0;
+export const PROCESSING_TIME_MS_MAX = 60000;
 
 /** 環境変数ソース（テスト容易性のため注入可能にする）。 */
 export type EnvSource = Record<string, string | undefined>;
@@ -126,6 +133,8 @@ export function resolveTableConfig(env: EnvSource = process.env): TableConfig {
 export interface RuntimeVerificationConfig {
   bestBeforeDays: number;
   seedUnitCountMax: number;
+  /** worker の擬似処理時間（ミリ秒。R5 / T1 観測用。既定 0）。 */
+  processingTimeMs: number;
 }
 
 export function resolveVerificationConfig(
@@ -145,6 +154,13 @@ export function resolveVerificationConfig(
       SEED_UNIT_COUNT_MAX_DEFAULT,
       SEED_UNIT_COUNT_MAX_MIN,
       SEED_UNIT_COUNT_MAX_MAX,
+    ),
+    processingTimeMs: resolveIntInRange(
+      env,
+      ENV_KEYS.PROCESSING_TIME_MS,
+      PROCESSING_TIME_MS_DEFAULT,
+      PROCESSING_TIME_MS_MIN,
+      PROCESSING_TIME_MS_MAX,
     ),
   };
 }

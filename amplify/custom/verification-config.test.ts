@@ -26,7 +26,22 @@ describe("resolveVerificationConfig", () => {
         VERIFICATION_DEFAULTS.routerParallelizationFactor,
       seedUnitCountMax: VERIFICATION_DEFAULTS.seedUnitCountMax,
       bestBeforeDays: VERIFICATION_DEFAULTS.bestBeforeDays,
+      processingTimeMs: VERIFICATION_DEFAULTS.processingTimeMs,
     });
+  });
+
+  it("既定の PROCESSING_TIME_MS は 0（本来の挙動）", () => {
+    expect(resolveVerificationConfig({ env: {} }).processingTimeMs).toBe(0);
+  });
+
+  it("PROCESSING_TIME_MS を範囲内で解決し、範囲外(>60000)は失敗する", () => {
+    expect(
+      resolveVerificationConfig({ env: { PROCESSING_TIME_MS: "3000" } })
+        .processingTimeMs,
+    ).toBe(3000);
+    expect(() =>
+      resolveVerificationConfig({ env: { PROCESSING_TIME_MS: "60001" } }),
+    ).toThrow(VerificationConfigError);
   });
 
   it("既定の BEST_BEFORE_DAYS は 365（要件 3.2 準拠）", () => {

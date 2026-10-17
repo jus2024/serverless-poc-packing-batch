@@ -72,6 +72,8 @@ export interface StartLabelingResponse {
 export interface LabelingConfig {
   bestBeforeDays: number;
   seedUnitCountMax: number;
+  /** worker の擬似処理時間（ミリ秒。R5/T1 観測用。既定 0）。 */
+  processingTimeMs: number;
   relayMode: string;
   labelingMaxConcurrency: string;
 }

@@ -77,9 +77,15 @@ export function parsePayload(record: SQSRecord): LabelingMessagePayload {
   };
 }
 
+/** 擬似処理時間用の sleep（R5 / T1 観測。processingTimeMs=0 なら即 return）。 */
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
   const tables = resolveTableNames();
-  const { bestBeforeDays } = resolveVerificationConfig();
+  const { bestBeforeDays, processingTimeMs } = resolveVerificationConfig();
   const client = getDocClient();
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
@@ -112,6 +118,12 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
         }
         throw err;
       }
+
+      // 擬似処理時間（R5 / T1 観測用。既定 0 なら即スキップ）。
+      // 付番が成功した「本当の仕事」の分だけ 1 件の処理時間 D を延ばし、
+      // リトルの法則で ConcurrentExecutions を押し上げる。二重配信（上の continue）には
+      // 課さないので、冪等で弾かれる再配信が擬似遅延で水増しされることはない。
+      await sleep(processingTimeMs);
 
       // 3. 付番成功 → labeled_count を ADD（UPDATED_NEW で更新後値を得る）
       const addUpdate = buildLabeledCountAddUpdate();

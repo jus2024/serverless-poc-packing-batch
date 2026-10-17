@@ -44,6 +44,7 @@ export const VERIFICATION_DEFAULTS = {
   routerParallelizationFactor: 1,
   seedUnitCountMax: 1200,
   bestBeforeDays: 365,
+  processingTimeMs: 0,
 } as const;
 
 /** 解決済みの検証パラメータ（design §4.1 の表）。 */
@@ -62,6 +63,16 @@ export interface VerificationConfig {
   seedUnitCountMax: number;
   /** 付番時の賞味期限日数（§6.3。既定 365 のまま要件 3.2 準拠）。 */
   bestBeforeDays: number;
+  /**
+   * worker の擬似処理時間（ミリ秒。R5 / T1 の観測用）。
+   *
+   * worker は本来 UpdateItem 2 回（約 80ms）で終わるため、1 バッチ程度では SQS→Lambda の
+   * スケール（1 分あたり最大 60 インスタンス増）が立ち上がる前にキューが枯れ、
+   * ConcurrentExecutions が 1,000 に届かない。付番後に擬似 sleep を入れて 1 件の処理時間 D を
+   * 延ばすと、リトルの法則（同時実行 ≒ 到着レート × D）で同じ件数でも多重度を押し上げられる。
+   * 既定 0（本来の挙動）。1000 多重検証では 3000〜5000ms 程度に設定する。
+   */
+  processingTimeMs: number;
 }
 
 /** 範囲外・解釈不能な検証パラメータを検出したときの例外（非機能 5）。 */
@@ -150,6 +161,15 @@ const NUMERIC_SPECS = {
     integer: true,
     range: "1〜3650",
   },
+  processingTimeMs: {
+    env: "PROCESSING_TIME_MS",
+    fallback: VERIFICATION_DEFAULTS.processingTimeMs,
+    min: 0,
+    // 上限 60000ms（worker タイムアウト 60 秒に収まる範囲。超えると付番自体が失敗する）
+    max: 60000,
+    integer: true,
+    range: "0〜60000",
+  },
 } as const satisfies Record<string, NumericParamSpec>;
 
 type NumericParamKey = keyof typeof NUMERIC_SPECS;
@@ -206,6 +226,7 @@ export function resolveVerificationConfig(
     routerParallelizationFactor: values.routerParallelizationFactor,
     seedUnitCountMax: values.seedUnitCountMax,
     bestBeforeDays: values.bestBeforeDays,
+    processingTimeMs: values.processingTimeMs,
   };
 }
 

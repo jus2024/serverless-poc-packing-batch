@@ -70,7 +70,19 @@ describe("resolveVerificationConfig", () => {
     expect(resolveVerificationConfig({})).toEqual({
       bestBeforeDays: BEST_BEFORE_DAYS_DEFAULT,
       seedUnitCountMax: SEED_UNIT_COUNT_MAX_DEFAULT,
+      processingTimeMs: 0,
     });
+  });
+
+  it("PROCESSING_TIME_MS を範囲内で解決する（R5/T1 観測用。既定 0）", () => {
+    expect(resolveVerificationConfig({}).processingTimeMs).toBe(0);
+    expect(
+      resolveVerificationConfig({ [ENV_KEYS.PROCESSING_TIME_MS]: "3000" })
+        .processingTimeMs,
+    ).toBe(3000);
+    expect(() =>
+      resolveVerificationConfig({ [ENV_KEYS.PROCESSING_TIME_MS]: "60001" }),
+    ).toThrow(RuntimeConfigError);
   });
 
   it("範囲内の値を解決する", () => {
