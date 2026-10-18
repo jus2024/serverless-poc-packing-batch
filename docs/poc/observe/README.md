@@ -49,12 +49,38 @@ REGION=ap-northeast-1 bash docs/poc/observe/observe.sh
 # 1. worker の処理時間を延ばして再デプロイ（キューを枯らさず多重を積み上げるため）
 PROCESSING_TIME_MS=3000 npx ampx sandbox
 
-# 2. 画面 A で unit_count=1200 のバッチを複数登録 → 画面 B で相次いで [付番開始]
-#    （滞留を切らさないだけの供給を入れる。1 バッチだと途中でキューが枯れる）
+# 2. 負荷投入（load.sh）: 複数バッチを一括で滞留させる。画面 B の手動連打の代わり。
+#    seeder を直接 invoke するので Cognito 認証は不要。
+BATCHES=10 UNIT_COUNT=1200 bash docs/poc/observe/load.sh
 
 # 3. 投入開始から数分後に観測（細かい粒度で立ち上がりを見る）
 DURATION_MIN=20 PERIOD=10 bash docs/poc/observe/observe.sh
+
+# 滞留が切れそうなら load.sh を再実行して追い投入する（供給を途切れさせない）
 ```
+
+### load.sh（負荷投入ツール）
+
+複数の roast-batch を直接作成し seeder を非同期 invoke して、大量の個体を滞留させる。
+画面 B の [付番開始] を人手で連打する代わりの機械的な投入。実機パイプラインと同じ
+（roast-batch を LABELING で作成 → seeder invoke → Streams → 入口 → SQS → worker）。
+
+| 環境変数 | 既定 | 意味 |
+|----------|------|------|
+| `BATCHES` | `5` | 投入するバッチ数 |
+| `UNIT_COUNT` | `1200` | 1 バッチあたりの個体数（`SEED_UNIT_COUNT_MAX` 以下） |
+| `STAGGER_SEC` | `0` | バッチ投入の間隔（秒）。`0`=一斉、`20`=20 秒おき |
+| `REGION` / `PREFIX` / `LOT_ID` / `ITEM_ID` / `ROAST_DATE` | observe.sh と同様 | — |
+
+```bash
+# 5 バッチ × 1200 = 6,000 個体を一斉投入
+bash docs/poc/observe/load.sh
+# 10 バッチを 20 秒間隔で投入（立ち上がりを長く保つ）
+BATCHES=10 STAGGER_SEC=20 bash docs/poc/observe/load.sh
+```
+
+> ★ 従量課金が発生する（DynamoDB 書き込み・Lambda 実行・SQS）。大量投入はコストに直結するため、
+> 検証後は `npx ampx sandbox delete` でスタックごと破棄すること。
 
 ConcurrentExecutions は「1 分あたり最大 60 インスタンス増」で律速されるため、1000 到達までは
 時間がかかる。滞留（`queue_visible_max`）が 0 に落ちる前に次のバッチを足し続けると、カーブが
