@@ -76,6 +76,11 @@ Kiro Roasters の梱包バッチ処理（DynamoDB Streams → SQS → 付番ワ�
 ピーク **857 多重**。+180s で滞留が 827 → 16 に急落＝**キューが枯れた瞬間に頭打ち**。
 到達の律速は Lambda スケール上限ではなく「滞留量（供給）」だと確定。
 
+補助指標（observe.sh 拡張版）:
+- worker Duration avg ~3,080ms / p99 ~3,600ms、Errors 0、Throttles 0。
+- **SQS 最古メッセージ滞留（最大）26 秒** ← 多重が足りずキューが一時的に詰まった（下の 1000 の回と対照）。
+- **SQS 送信 12,000 / 削除 12,000（取りこぼしなし）** ← 投入した全個体が付番・削除された。
+
 ### 4.2 試行 2 — 供給を厚くして 1000 到達・張り付き
 
 - 投入: `BATCHES=20 UNIT_COUNT=1200 STAGGER_SEC=10`（24,000 個体。試行 1 の 2 倍・間隔半分）
@@ -99,8 +104,17 @@ Kiro Roasters の梱包バッチ処理（DynamoDB Streams → SQS → 付番ワ�
 | 10:22 | 1,000 | 0 | 393 | 2,360 |
 
 - **1,000 多重に約 3 分張り付き**（`MaximumConcurrency=1000` の天井が効いている＝それ以上増えない）。
-- worker Throttles **0**。unit テーブル WriteThrottleEvents **0**。
+- worker Throttles **0**、worker Errors **0**。unit テーブル WriteThrottleEvents **0**。
 - 10:21 以降 `queue_inflight` が増加＝1000 で頭打ちになり処理が追いつかず「処理中」が溜まり始めた兆候。
+
+補助指標（observe.sh 拡張版）:
+- worker Duration avg ~3,140ms / p99 ~3,614ms（857 の回とほぼ同じ＝1000 でも処理時間劣化なし）。
+- **SQS 最古メッセージ滞留（最大）3 秒** ← 多重が十分でキューが詰まらず常に新鮮（857 の回の 26 秒と対照的）。
+- **SQS 送信 24,000 / 削除 24,000（取りこぼしなし）** ← 20 バッチ全個体を欠落なく付番。
+
+**857 の回との対比（滞留の古さ）が示すこと**: 同じ worker・同じ D でも、多重が足りないと最古メッセージが
+26 秒まで古くなる（処理が到着に追いつかない）が、1000 まで出ると 3 秒に収まる。SQS を挟むことで
+「多重を増やして滞留の古さを抑える」制御が効いていることの実測。
 
 ### 4.3 Duration（1 件の処理時間。両試行で比較）
 
@@ -145,7 +159,7 @@ worker Duration（ms、`get-metric-statistics`、1 分粒度）:
 | L_cmp 方式比較 | `RELAY_MODE=lambda`（中継 Lambda）で同条件再測し、Pipes 版と到達時間・取りこぼし・IteratorAge・運用を比較（T3） | 未実施（次） |
 | L3 / L4 | 3〜5 バッチ同時のピーク多重・Queue 深度・IteratorAge | 試行 2 が実質 20 バッチ相当。個別 L3/L4 は未整理 |
 | 1250 への接近 | `MaximumConcurrency` を上げて上限に迫る | 未実施 |
-| IteratorAge の計測 | 入口の遅れ時間（Pipes `AWS/Pipes` / router `AWS/Lambda`） | 未計測（L_cmp で取得予定） |
+| 入口の遅れ計測 | Pipes 側は `AWS/Pipes` が本アカウント/構成で**未発行**のため CloudWatch では観測不可（＝ Pipes 経路は入口の遅れがメトリクスで見えない、という知見）。router 側は `AWS/Lambda` IteratorAge で取得可能 | router 側は L_cmp（lambda モード）で取得予定。SQS 最古滞留は取得済み |
 
 ---
 
@@ -178,10 +192,16 @@ Throttles(worker/unit): ...
 
 | 観点 | 方式 A-Pipes | 方式 A-Lambda（router） |
 |------|-------------|------------------------|
-| ピーク同時実行 | 1,000（試行 2） | 未測 |
-| 1000 到達まで | +60 秒（厚い供給下） | 未測 |
-| worker Duration avg | ~3,055ms | 未測 |
-| worker/unit Throttle | 0 / 0 | 未測 |
-| 入口の遅れ（IteratorAge） | 未計測 | 未測 |
-| 取りこぼし | なし（投入=付番完了を確認） | 未測 |
+| ピーク同時実行 | 1,000（試行 2、24,000 個体） | 未測 |
+| 1000 到達まで | +120 秒（粒度 60s の点ベース。厚い供給下） | 未測 |
+| worker Duration avg / p99 | ~3,140ms / ~3,614ms | 未測 |
+| worker Errors / Throttle | 0 / 0 | 未測 |
+| unit テーブル WriteThrottle | 0 | 未測 |
+| SQS 最古メッセージ滞留（最大） | 3 秒（1000 の回）/ 26 秒（857 の回） | 未測 |
+| 取りこぼし（送信=削除） | なし（24,000=24,000） | 未測 |
+| 入口の遅れ（IteratorAge） | CloudWatch では観測不可（`AWS/Pipes` 未発行） | router `AWS/Lambda` IteratorAge で取得予定 |
 | 実装・運用 | マネージド（フィルタ+Target 設定のみ。batchSize は SQS 上限 10 に注意） | 自前 Lambda（ESM で Streams 読み、SendMessageBatch） |
+
+> 粒度の限界: ConcurrentExecutions は CloudWatch メトリクスの最小粒度が 1 分のため、立ち上がりカーブは
+> 1 分刻みの点でしか得られない（`PERIOD=10` を指定しても点は増えない）。秒粒度のカーブが必要なら
+> CloudWatch Logs Insights で worker の START/END ログから再構成する（本検証では未実施＝案 C）。

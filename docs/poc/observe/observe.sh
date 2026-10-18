@@ -62,6 +62,11 @@ WORKER="$(aws lambda list-functions --region "$REGION" \
   --output text | pick_first)"
 UNIT_TABLE="$(aws dynamodb list-tables --region "$REGION" \
   --query "TableNames[?starts_with(@,'${PREFIX}-unit')]" --output text | pick_first)"
+ROAST_TABLE="$(aws dynamodb list-tables --region "$REGION" \
+  --query "TableNames[?starts_with(@,'${PREFIX}-roast-batch')]" --output text | pick_first)"
+ROUTER="$(aws lambda list-functions --region "$REGION" \
+  --query "Functions[?starts_with(FunctionName,'${PREFIX}-labeling-router')].FunctionName" \
+  --output text | pick_first)"
 QUEUE_NAME="$(aws sqs list-queues --region "$REGION" --queue-name-prefix "${PREFIX}-labeling" \
   --query "QueueUrls" --output text 2>/dev/null | tr '\t' '\n' | grep -v 'dlq' | grep . | head -1 | sed 's#.*/##' || true)"
 
@@ -150,13 +155,30 @@ fi
 # file:// 経由で渡し、長い引数のクォート事故も避ける。
 QFILE="$(mktemp)"
 trap 'rm -f "$QFILE"' EXIT
+
+# 中継 Lambda（router）の IteratorAge は RELAY_MODE=lambda/both のときだけ値を持つ
+# （Streams ESM が付いている場合）。router が存在すれば m14 として追加する。
+# Pipes 専用のメトリクス（AWS/Pipes）は本アカウント/構成では未発行のため取得しない
+# （= Pipes 経路は入口の遅れを CloudWatch では観測できない。方式比較の論点として記録する）。
+ROUTER_Q=""
+if [[ -n "$ROUTER" && "$ROUTER" != "None" ]]; then
+  ROUTER_Q=",{\"Id\":\"m14\",\"Label\":\"RouterIteratorAgeMs\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"IteratorAge\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
+fi
+
 printf '%s' "[\
 {\"Id\":\"m1\",\"Label\":\"WorkerConcurrent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"ConcurrentExecutions\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$WORKER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},\
 {\"Id\":\"m2\",\"Label\":\"WorkerInvocations\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"Invocations\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$WORKER\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
 {\"Id\":\"m3\",\"Label\":\"WorkerThrottles\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"Throttles\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$WORKER\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
 {\"Id\":\"m4\",\"Label\":\"QueueVisible\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"ApproximateNumberOfMessagesVisible\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},\
 {\"Id\":\"m5\",\"Label\":\"QueueInFlight\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"ApproximateNumberOfMessagesNotVisible\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},\
-{\"Id\":\"m6\",\"Label\":\"UnitWriteThrottle\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/DynamoDB\",\"MetricName\":\"WriteThrottleEvents\",\"Dimensions\":[{\"Name\":\"TableName\",\"Value\":\"$UNIT_TABLE\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}}\
+{\"Id\":\"m6\",\"Label\":\"UnitWriteThrottle\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/DynamoDB\",\"MetricName\":\"WriteThrottleEvents\",\"Dimensions\":[{\"Name\":\"TableName\",\"Value\":\"$UNIT_TABLE\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
+{\"Id\":\"m7\",\"Label\":\"WorkerDurationAvg\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"Duration\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$WORKER\"}]},\"Period\":$PERIOD,\"Stat\":\"Average\"}},\
+{\"Id\":\"m8\",\"Label\":\"WorkerDurationP99\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"Duration\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$WORKER\"}]},\"Period\":$PERIOD,\"Stat\":\"p99\"}},\
+{\"Id\":\"m9\",\"Label\":\"WorkerErrors\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"Errors\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$WORKER\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
+{\"Id\":\"m10\",\"Label\":\"QueueOldestAgeSec\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"ApproximateAgeOfOldestMessage\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},\
+{\"Id\":\"m11\",\"Label\":\"QueueMessagesSent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"NumberOfMessagesSent\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
+{\"Id\":\"m12\",\"Label\":\"QueueMessagesDeleted\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"NumberOfMessagesDeleted\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
+{\"Id\":\"m13\",\"Label\":\"RoastBatchWCU\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/DynamoDB\",\"MetricName\":\"ConsumedWriteCapacityUnits\",\"Dimensions\":[{\"Name\":\"TableName\",\"Value\":\"$ROAST_TABLE\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}}$ROUTER_Q\
 ]" > "$QFILE"
 
 echo "GetMetricData 取得中 ($START 〜 $END)..."

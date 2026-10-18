@@ -17,9 +17,17 @@ COLUMNS = [
     ("WorkerConcurrent", "worker_concurrent_max"),
     ("WorkerInvocations", "worker_invocations_sum"),
     ("WorkerThrottles", "worker_throttles_sum"),
+    ("WorkerErrors", "worker_errors_sum"),
+    ("WorkerDurationAvg", "worker_duration_avg_ms"),
+    ("WorkerDurationP99", "worker_duration_p99_ms"),
     ("QueueVisible", "queue_visible_max"),
     ("QueueInFlight", "queue_inflight_max"),
+    ("QueueOldestAgeSec", "queue_oldest_age_sec_max"),
+    ("QueueMessagesSent", "queue_sent_sum"),
+    ("QueueMessagesDeleted", "queue_deleted_sum"),
     ("UnitWriteThrottle", "unit_write_throttle_sum"),
+    ("RoastBatchWCU", "roast_batch_wcu_sum"),
+    ("RouterIteratorAgeMs", "router_iterator_age_ms_max"),
 ]
 # 1000 多重の立ち上がりを測る到達しきい値
 RAMP_TARGETS = [100, 250, 500, 750, 900, 1000]
@@ -84,11 +92,32 @@ def main() -> None:
                 print(f"  {target:>5} 多重: +{elapsed:6.0f} 秒 ({hit})")
             else:
                 print(f"  {target:>5} 多重: 未到達")
+    # Duration（最大の点＝最も負荷が高い瞬間の処理時間）
+    dur_avg = [v for v in series["WorkerDurationAvg"].values() if v is not None]
+    dur_p99 = [v for v in series["WorkerDurationP99"].values() if v is not None]
+    errors_total = sum(v for v in series["WorkerErrors"].values())
+    oldest = [v for v in series["QueueOldestAgeSec"].values() if v is not None]
+    sent_total = sum(v for v in series["QueueMessagesSent"].values())
+    deleted_total = sum(v for v in series["QueueMessagesDeleted"].values())
+    router_age = [v for v in series["RouterIteratorAgeMs"].values() if v is not None]
+
     print("")
+    if dur_avg:
+        print(f"worker Duration: avg {max(dur_avg):.0f}ms（ピーク分） / "
+              f"p99 {max(dur_p99):.0f}ms" if dur_p99 else f"worker Duration avg {max(dur_avg):.0f}ms")
+    print(f"worker Errors 合計: {errors_total:g}"
+          + ("  ← エラーあり" if errors_total > 0 else ""))
     print(f"worker Throttles 合計: {throttle_total:g}"
           + ("  ← スロットル発生あり" if throttle_total > 0 else "  （スロットルなし）"))
     print(f"unit テーブル WriteThrottleEvents 合計 (T2): {unit_throttle_total:g}"
           + ("  ← オンデマンドの初動スロットルを観測" if unit_throttle_total > 0 else "  （スロットルなし）"))
+    if oldest:
+        print(f"SQS 最古メッセージ滞留 (最大): {max(oldest):g} 秒")
+    print(f"SQS 送信 {sent_total:g} / 削除 {deleted_total:g} 件"
+          + ("  （送信=削除。取りこぼしなし）" if sent_total == deleted_total
+             else "  ← 送信と削除に差（処理中/未処理が残っている可能性）"))
+    if router_age:
+        print(f"中継 Lambda IteratorAge (最大): {max(router_age):g} ms  ← 方式 A-Lambda の入口遅れ")
     print("────────────────────────────────────────────")
 
 

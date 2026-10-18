@@ -54,11 +54,21 @@ START_TIME=$T0 PERIOD=10 bash docs/poc/observe/observe.sh
 
 ## 出力
 
-- **CSV**: `out/observe-<timestamp>.csv`。列は timestamp・worker 同時実行(最大)・
-  Invocations(合計)・Throttles(合計)・SQS 滞留(最大)・SQS 処理中(最大)・unit 書込スロットル(合計)。
-  表計算やグラフ化にそのまま使える（記事のグラフ素材）。
-- **サマリ**（標準出力）: ピーク同時実行数と、各しきい値（100/250/500/750/900/1000 多重）に
-  **初めて到達した経過秒**（＝立ち上がりカーブ T1）、worker/unit テーブルの Throttle 合計（T2）。
+- **CSV**: `out/observe-<timestamp>.csv`。表計算・グラフ化にそのまま使える。列:
+  - `worker_concurrent_max` 同時実行（最大）／ `worker_invocations_sum` 呼び出し数
+  - `worker_errors_sum` エラー／ `worker_duration_avg_ms` ・ `worker_duration_p99_ms` 処理時間
+  - `queue_visible_max` 滞留／ `queue_inflight_max` 処理中／ `queue_oldest_age_sec_max` 最古メッセージ滞留秒
+  - `queue_sent_sum` 送信／ `queue_deleted_sum` 削除（**送信=削除なら取りこぼしなし**）
+  - `unit_write_throttle_sum` unit 書込スロットル（T2）／ `roast_batch_wcu_sum` 完了カウンタ更新の WCU
+  - `router_iterator_age_ms_max` 中継 Lambda の入口遅れ（`RELAY_MODE=lambda/both` のときのみ値が入る）
+- **サマリ**（標準出力）: ピーク同時実行数、各しきい値（100/250/500/750/900/1000）への**到達経過秒**（T1）、
+  Duration avg/p99、Errors、worker/unit Throttle（T2）、SQS 最古滞留、送信=削除の取りこぼし判定、
+  中継 Lambda IteratorAge（lambda モード時）。
+
+> 入口（Streams→SQS）の遅れ: `AWS/Pipes` のメトリクスは本アカウント/構成では未発行のため、Pipes 経路の
+> 入口遅れは CloudWatch では取れない。中継 Lambda 経路は `router_iterator_age_ms_max` で観測できる
+> （これ自体が方式比較の論点: Lambda 中継のほうが入口を可観測にできる）。
+> ConcurrentExecutions は最小 1 分粒度のため立ち上がりカーブは 1 分刻み。秒粒度は Logs Insights で別途再構成する。
 
 ## 典型的な観測手順（R5）
 
