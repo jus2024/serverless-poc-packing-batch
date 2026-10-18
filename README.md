@@ -178,6 +178,8 @@ npm run dev
 | R5 | スケール | `ConcurrentExecutions` を最大 1,000 まで到達、`MaximumConcurrency=1000` で張り付かせる。立ち上がりカーブを観測 |
 
 詳細な要件・設計・タスクは [`.kiro/specs/sqs-labeling-poc/`](.kiro/specs/sqs-labeling-poc/) にあります。
+実機の検証結果（R1〜R5・立ち上がりカーブ T1・オンデマンドのスロットル T2・実機で見つけた不具合）は
+[`docs/poc/verification-results.md`](docs/poc/verification-results.md) に記録しています（随時追記）。
 
 ## 開発・検証コマンド
 
