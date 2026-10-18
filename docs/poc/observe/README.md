@@ -31,9 +31,26 @@ REGION=ap-northeast-1 bash docs/poc/observe/observe.sh
 |----------|------|------|
 | `REGION` | `us-west-2`（`AWS_REGION` があればそちら） | 対象リージョン |
 | `PREFIX` | `kiro-roasters` | リソース検出の命名接頭辞 |
-| `DURATION_MIN` | `15` | 遡る時間（分） |
+| `DURATION_MIN` | `15` | 遡る時間（分）。`START_TIME` 指定時は無視 |
 | `PERIOD` | `60` | 粒度（秒）。立ち上がりを細かく見るなら `10` |
+| `START_TIME` | （空） | 窓の起点。前回の投入を除外してこの投入だけを見るときに使う。`now` / `now-10min` / `now-2h` / ISO8601 絶対時刻（`2026-10-18T10:28:00Z`） |
+| `END_TIME` | （空＝現在） | 窓の終点。省略時は現在時刻。`START_TIME` と同じ書式 |
 | `OUT_DIR` | `docs/poc/observe/out` | CSV 出力先 |
+
+`START_TIME` を指定すると `DURATION_MIN` は無視され、サマリの「到達秒」はその窓の起点を 0 秒として
+計算される（前回の投入が窓に混ざらないので立ち上がりカーブが読みやすい）。`START_TIME=now` のみ
+指定した場合は窓が 0 になるため、END から 1 粒度分だけさかのぼった最小窓で走る（エラーにしない）。
+
+**きれいにカーブを取るコツ:** 投入を始める直前に `date -u +%Y-%m-%dT%H:%M:%SZ` で時刻を控え、
+投入後に `START_TIME=<その時刻>` で観測すると、その投入だけの立ち上がりが得られる。
+
+```bash
+# 例: 投入開始時刻を控えてから投入 → あとでその時刻を起点に観測
+T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BATCHES=20 UNIT_COUNT=1200 STAGGER_SEC=10 bash docs/poc/observe/load.sh
+# （数分待つ）
+START_TIME=$T0 PERIOD=10 bash docs/poc/observe/observe.sh
+```
 
 ## 出力
 

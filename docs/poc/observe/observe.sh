@@ -14,6 +14,10 @@
 #   bash docs/poc/observe/observe.sh                 # 直近 15 分を 60 秒粒度で
 #   DURATION_MIN=30 PERIOD=10 bash docs/poc/observe/observe.sh
 #   REGION=ap-northeast-1 bash docs/poc/observe/observe.sh
+#   START_TIME=now bash docs/poc/observe/observe.sh                    # 今この瞬間を起点に
+#   START_TIME=now-10min bash docs/poc/observe/observe.sh             # 10 分前から今まで
+#   START_TIME=2026-10-18T10:28:00Z bash docs/poc/observe/observe.sh  # 絶対時刻を起点に
+#   START_TIME=... END_TIME=... bash docs/poc/observe/observe.sh      # 窓を両端固定
 #
 # 前提:
 #   - AWS CLI v2 が設定済み（sandbox と同じ資格情報・リージョン）
@@ -25,15 +29,24 @@ set -euo pipefail
 # ─── 設定（環境変数で上書き可） ───────────────────────────────────
 REGION="${REGION:-${AWS_REGION:-us-west-2}}"
 PREFIX="${PREFIX:-kiro-roasters}"
-DURATION_MIN="${DURATION_MIN:-15}"   # 遡る時間（分）
+DURATION_MIN="${DURATION_MIN:-15}"   # 遡る時間（分）。START_TIME 指定時は無視される
 PERIOD="${PERIOD:-60}"               # 粒度（秒）。10 / 30 / 60 など
+# 絶対時刻で窓を固定したいとき（前回の投入を除外してこの投入だけを見る）。
+# UTC ISO8601（例 2026-10-18T10:28:00Z）。START_TIME を指定すると DURATION_MIN は無視され、
+# END_TIME 省略時は現在時刻までになる。
+START_TIME="${START_TIME:-}"
+END_TIME="${END_TIME:-}"
 OUT_DIR="${OUT_DIR:-$(cd "$(dirname "$0")" && pwd)/out}"
 
 mkdir -p "$OUT_DIR"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 CSV="$OUT_DIR/observe-$STAMP.csv"
 
-echo "リージョン: $REGION / 接頭辞: $PREFIX / 期間: 直近 ${DURATION_MIN} 分 / 粒度: ${PERIOD}s"
+if [[ -n "$START_TIME" ]]; then
+  echo "リージョン: $REGION / 接頭辞: $PREFIX / 期間: START_TIME=${START_TIME} 指定 / 粒度: ${PERIOD}s"
+else
+  echo "リージョン: $REGION / 接頭辞: $PREFIX / 期間: 直近 ${DURATION_MIN} 分 / 粒度: ${PERIOD}s"
+fi
 
 # ─── リソースの自動検出（サフィックスをハードコードしない） ───────────
 # 検出のポイント:
@@ -61,13 +74,74 @@ echo "unit table: $UNIT_TABLE"
 echo "queue: $QUEUE_NAME"
 
 # ─── 期間（UTC ISO8601） ──────────────────────────────────────────
-# macOS(date -v) と GNU(date -d) の両対応
-if date -v-1M >/dev/null 2>&1; then
-  START="$(date -u -v-"${DURATION_MIN}"M +%Y-%m-%dT%H:%M:%SZ)"
+# 時刻トークンを UTC ISO8601 に解決する。受け付ける形:
+#   - "now"                 … 現在時刻
+#   - "now-10min" / "now-2h"… 現在からの相対（分 min / 時 h）
+#   - ISO8601 絶対時刻       … 2026-10-18T10:28:00Z 等はそのまま使う
+# macOS(date -v) と GNU(date -d) の両対応。
+resolve_time() {
+  local tok="$1"
+  if [[ "$tok" == "now" ]]; then
+    date -u +%Y-%m-%dT%H:%M:%SZ
+    return
+  fi
+  if [[ "$tok" =~ ^now-([0-9]+)(min|m|h)$ ]]; then
+    local n="${BASH_REMATCH[1]}" unit="${BASH_REMATCH[2]}"
+    if date -v-1M >/dev/null 2>&1; then
+      case "$unit" in
+        h) date -u -v-"${n}"H +%Y-%m-%dT%H:%M:%SZ ;;
+        *) date -u -v-"${n}"M +%Y-%m-%dT%H:%M:%SZ ;;
+      esac
+    else
+      case "$unit" in
+        h) date -u -d "${n} hours ago" +%Y-%m-%dT%H:%M:%SZ ;;
+        *) date -u -d "${n} minutes ago" +%Y-%m-%dT%H:%M:%SZ ;;
+      esac
+    fi
+    return
+  fi
+  # それ以外は絶対時刻としてそのまま使う
+  printf '%s' "$tok"
+}
+
+if [[ -n "$START_TIME" ]]; then
+  # 絶対/相対で窓を固定（前回の投入を除外してこの投入だけを見る）
+  START="$(resolve_time "$START_TIME")"
 else
-  START="$(date -u -d "${DURATION_MIN} minutes ago" +%Y-%m-%dT%H:%M:%SZ)"
+  # 従来どおり DURATION_MIN 分だけ遡る
+  if date -v-1M >/dev/null 2>&1; then
+    START="$(date -u -v-"${DURATION_MIN}"M +%Y-%m-%dT%H:%M:%SZ)"
+  else
+    START="$(date -u -d "${DURATION_MIN} minutes ago" +%Y-%m-%dT%H:%M:%SZ)"
+  fi
 fi
-END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if [[ -n "$END_TIME" ]]; then
+  END="$(resolve_time "$END_TIME")"
+else
+  END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+fi
+
+# CloudWatch は start < end を要求する。START_TIME=now のように窓が 0 以下になる場合は、
+# 直近 1 粒度分（最低 60 秒）さかのぼって最小の窓にして走らせる（エラーにしない）。
+to_epoch() {
+  if date -v-1M >/dev/null 2>&1; then
+    date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || echo 0
+  else
+    date -u -d "$1" +%s 2>/dev/null || echo 0
+  fi
+}
+START_EPOCH="$(to_epoch "$START")"
+END_EPOCH="$(to_epoch "$END")"
+if [[ "$START_EPOCH" -ge "$END_EPOCH" ]]; then
+  BACK=$(( PERIOD > 60 ? PERIOD : 60 ))
+  if date -v-1M >/dev/null 2>&1; then
+    START="$(date -u -r $(( END_EPOCH - BACK )) +%Y-%m-%dT%H:%M:%SZ)"
+  else
+    START="$(date -u -d "@$(( END_EPOCH - BACK ))" +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  echo "注意: 窓が 0 以下だったため、END から ${BACK} 秒さかのぼって最小の窓にしました（START_TIME=now 等）。" >&2
+fi
 
 # ─── GetMetricData クエリ ────────────────────────────────────────
 # m1 ConcurrentExecutions(worker 最大)  m2 Invocations  m3 Throttles(worker)
