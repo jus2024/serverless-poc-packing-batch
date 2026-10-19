@@ -22,7 +22,16 @@ import styles from "../labeling.module.css";
 
 type TraceBy = "batch" | "lot";
 
-export default function QcPanel() {
+interface QcPanelProps {
+  /**
+   * このタブが現在アクティブ（表示中）か。全パネルを常時マウントするため（§7.4）、
+   * 付番完了（worker 完了）後にこのタブへ切り替えた時だけ最新化できるよう、
+   * アクティブ化のたびに出荷可能一覧を再取得する（UX-1）。
+   */
+  isActive: boolean;
+}
+
+export default function QcPanel({ isActive }: QcPanelProps) {
   const [batches, setBatches] = useState<RoastBatch[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,9 +61,12 @@ export default function QcPanel() {
     }
   }, []);
 
+  // 初回マウント時、およびこのタブがアクティブになるたびに出荷可能一覧を再取得する（UX-1）。
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (isActive) {
+      void load();
+    }
+  }, [isActive, load]);
 
   const runTrace = useCallback(async (by: TraceBy, key: string) => {
     const trimmed = key.trim();

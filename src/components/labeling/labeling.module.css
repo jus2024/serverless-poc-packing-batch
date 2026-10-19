@@ -624,3 +624,56 @@
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
+
+/* ─── 業務モード: 主要操作ボタン（BLOCK-1 / design §9 WCAG 2.1 AA）────────
+   「焙煎完了を記録」等の主要操作は従来 .primaryButton を流用していたが、
+   .primaryButton は検証画面（UnitTracePanel / BatchRegisterPanel）と共有される。
+   ダークモードの --color-primary (#4da6e0) に白文字を置くとコントラスト 2.68:1 で
+   WCAG 2.1 AA (4.5:1) 未達になるため、検証画面に影響を与えずに業務画面だけを補正
+   できるよう業務専用の .bizPrimaryButton を新設する。ライト時は従来 primary と同系、
+   ダーク時は白文字で 4.5:1 以上を満たす濃い青へ上書きする。 */
+.bizPrimaryButton {
+  min-height: 44px;
+  align-self: flex-start;
+  padding: 0.6rem 1.4rem;
+  background-color: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.bizPrimaryButton:hover:not(:disabled) {
+  background-color: var(--color-primary-hover);
+}
+
+.bizPrimaryButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.bizPrimaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* #1a6aad は白文字で 5.66:1、hover の #176bb0 は 5.58:1 で AA を満たす。
+     検証画面の .primaryButton は従来どおり --color-primary のまま変更しない。 */
+  .bizPrimaryButton {
+    background-color: #1a6aad;
+  }
+
+  .bizPrimaryButton:hover:not(:disabled) {
+    background-color: #176bb0;
+  }
+
+  /* .bizButton:hover も同様に白文字 + --color-primary でダーク未達になるため補正する。 */
+  .bizButton:hover:not(:disabled) {
+    background-color: #1a6aad;
+    color: #fff;
+  }
+}

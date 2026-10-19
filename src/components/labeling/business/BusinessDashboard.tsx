@@ -135,7 +135,7 @@ export default function BusinessDashboard({ isVisible }: BusinessDashboardProps)
         aria-labelledby="biz-tab-packing"
         hidden={active !== 1}
       >
-        <PackingPanel onMonitor={handleMonitor} />
+        <PackingPanel onMonitor={handleMonitor} isActive={isVisible && active === 1} />
       </div>
       <div
         id="biz-panel-line"
@@ -157,7 +157,7 @@ export default function BusinessDashboard({ isVisible }: BusinessDashboardProps)
         aria-labelledby="biz-tab-qc"
         hidden={active !== 3}
       >
-        <QcPanel />
+        <QcPanel isActive={isVisible && active === 3} />
       </div>
     </div>
   );

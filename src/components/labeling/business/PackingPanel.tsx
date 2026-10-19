@@ -22,6 +22,12 @@ import styles from "../labeling.module.css";
 interface PackingPanelProps {
   /** [モニタを見る] で選んだ batch_id をライン監督画面へ渡す。 */
   onMonitor: (batchId: string) => void;
+  /**
+   * このタブが現在アクティブ（表示中）か。全パネルを常時マウントするため（§7.4）、
+   * 焙煎完了など前工程の操作後にこのタブへ切り替えた時だけ最新化できるよう、
+   * アクティブ化のたびに一覧を再取得する（UX-1）。
+   */
+  isActive: boolean;
 }
 
 function amPmOf(batchId: string): string {
@@ -29,7 +35,7 @@ function amPmOf(batchId: string): string {
   return m ? m[1] : "—";
 }
 
-export default function PackingPanel({ onMonitor }: PackingPanelProps) {
+export default function PackingPanel({ onMonitor, isActive }: PackingPanelProps) {
   const [waiting, setWaiting] = useState<RoastBatch[]>([]);
   const [inProgress, setInProgress] = useState<RoastBatch[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,9 +66,13 @@ export default function PackingPanel({ onMonitor }: PackingPanelProps) {
     }
   }, []);
 
+  // 初回マウント時、およびこのタブがアクティブになるたびに一覧を再取得する（UX-1）。
+  // 非アクティブ時は取得しない（常時マウントでも裏側の無駄な再取得を避ける）。
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (isActive) {
+      void load();
+    }
+  }, [isActive, load]);
 
   async function handleStart(batchId: string) {
     setStartingId(batchId);

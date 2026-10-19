@@ -151,7 +151,7 @@ export default function RoastingPanel() {
           {loading ? "更新中…" : "再読み込み"}
         </button>
         <button
-          className={styles.primaryButton}
+          className={styles.bizPrimaryButton}
           type="button"
           onClick={handleRecord}
           disabled={submitting || selected.size === 0}
