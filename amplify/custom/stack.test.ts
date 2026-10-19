@@ -312,19 +312,66 @@ describe("合成/実行時キー名の突き合わせ（design §6.6 / §16）",
 });
 
 describe("LabelingFunctions — plan-seeder（焙煎計画 SEED。§4.2 / §4.4）", () => {
-  it("plan-seeder が roast-batch 限定の dynamodb:PutItem 権限を持つ", () => {
+  it("plan-seeder ロールの Policy が roast-batch ARN 限定の dynamodb:PutItem だけを持つ（BLOCK-3）", () => {
+    // 任意の Policy に PutItem があるだけでは退行を検出できないため、
+    // plan-seeder の関数 → 実行ロール → その Policy を特定し、
+    // (1) 対象 Resource が roast-batch テーブル ARN に結び付くこと、
+    // (2) DynamoDB action が PutItem ただ 1 つで余分な action が無いこと、を固定する。
     const { template } = buildStack();
-    // roast-batch 限定の PutItem（BatchWriteItem/GetItem は付けない。最小権限）
-    template.hasResourceProperties("AWS::IAM::Policy", {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: "dynamodb:PutItem",
-            Effect: "Allow",
-          }),
-        ]),
-      },
-    });
+
+    // 1) plan-seeder Lambda の論理 ID と実行ロールの論理 ID を特定する
+    const functions = template.findResources("AWS::Lambda::Function");
+    const planSeederEntry = Object.entries(functions).find(([, fn]) =>
+      String(fn.Properties?.FunctionName ?? "").includes("labeling-plan-seeder"),
+    );
+    expect(planSeederEntry).toBeDefined();
+    const planSeederRoleLogicalId =
+      planSeederEntry![1].Properties?.Role?.["Fn::GetAtt"]?.[0];
+    expect(planSeederRoleLogicalId).toBeDefined();
+
+    // 2) その実行ロールに結び付く IAM Policy を特定する
+    const policies = template.findResources("AWS::IAM::Policy");
+    const planSeederPolicies = Object.values(policies).filter((policy) =>
+      (policy.Properties?.Roles ?? []).some(
+        (role: unknown) =>
+          typeof role === "object" &&
+          role !== null &&
+          (role as { Ref?: string }).Ref === planSeederRoleLogicalId,
+      ),
+    );
+    expect(planSeederPolicies.length).toBeGreaterThan(0);
+
+    // 3) plan-seeder ロールに付く全 DynamoDB action を集計する
+    const dynamoActions = new Set<string>();
+    const putItemResources: unknown[] = [];
+    for (const policy of planSeederPolicies) {
+      const statements = policy.Properties?.PolicyDocument?.Statement ?? [];
+      for (const stmt of statements) {
+        const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+        for (const action of actions) {
+          if (typeof action === "string" && action.startsWith("dynamodb:")) {
+            dynamoActions.add(action);
+            if (action === "dynamodb:PutItem") {
+              putItemResources.push(stmt.Resource);
+            }
+          }
+        }
+      }
+    }
+
+    // 4) DynamoDB action は PutItem ただ 1 つ（BatchWriteItem/GetItem/UpdateItem/Scan 等は無い）
+    expect([...dynamoActions]).toEqual(["dynamodb:PutItem"]);
+
+    // 5) その PutItem の Resource が roast-batch テーブル ARN に結び付く
+    //    （roast-batch テーブルは GetAtt <table>.Arn で参照される）
+    const roastBatchTableLogicalId = Object.entries(
+      template.findResources("AWS::DynamoDB::GlobalTable"),
+    ).find(([logicalId]) =>
+      logicalId.includes("RoastBatch"),
+    )?.[0];
+    expect(roastBatchTableLogicalId).toBeDefined();
+    const resourceJson = JSON.stringify(putItemResources);
+    expect(resourceJson).toContain(roastBatchTableLogicalId!);
   });
 
   it("plan-seeder 追加後も Pipe/ESM 個数は不変（イベントソースを持たない）", () => {

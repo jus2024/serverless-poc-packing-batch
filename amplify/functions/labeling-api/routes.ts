@@ -268,14 +268,20 @@ function validateRoastingComplete(
   if (body === null || body === undefined || body === "") {
     throw new HttpError(400, "BadRequest", "request body is required");
   }
-  let parsed: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(body) as Record<string, unknown>;
+    parsed = JSON.parse(body);
   } catch {
     throw new HttpError(400, "BadRequest", "request body is not valid JSON");
   }
+  // JSON として正しくてもオブジェクトでなければ 400（null・配列・プリミティブを弾く）。
+  // 特に本文が `null` のとき、後続のプロパティ参照を行う前にここで 400 に揃える
+  // （ガードが無いと `parsed.batch_ids` が TypeError になり handler 外周の 500 に落ちる）。
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new HttpError(400, "BadRequest", "request body must be a JSON object");
+  }
 
-  const batchIds = parsed.batch_ids;
+  const batchIds = (parsed as Record<string, unknown>).batch_ids;
   if (!Array.isArray(batchIds)) {
     throw new HttpError(400, "BadRequest", "batch_ids must be an array");
   }

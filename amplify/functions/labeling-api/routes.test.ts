@@ -298,6 +298,29 @@ describe("routeRequest: POST /batches/roasting-complete（焙煎完了一括記�
       expect.objectContaining({ statusCode: 400 }),
     );
   });
+
+  it("JSON として正しい null 本文は 400（500 に落とさない。BLOCK-1）", () => {
+    // 本文が文字列 "null"（= JSON の null）でもオブジェクト性ガードで 400 に写す。
+    expect(() =>
+      routeRequest({
+        httpMethod: "POST",
+        resource: "/batches/roasting-complete",
+        body: "null",
+      }),
+    ).toThrowError(expect.objectContaining({ statusCode: 400 }));
+  });
+
+  it("配列・プリミティブ本文も 400（オブジェクトでない JSON）", () => {
+    for (const body of ["[]", "123", '"BATCH#x"', "true"]) {
+      expect(() =>
+        routeRequest({
+          httpMethod: "POST",
+          resource: "/batches/roasting-complete",
+          body,
+        }),
+      ).toThrowError(expect.objectContaining({ statusCode: 400 }));
+    }
+  });
 });
 
 describe("routeRequest: GET /units（画面 D）", () => {
