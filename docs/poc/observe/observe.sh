@@ -162,7 +162,9 @@ trap 'rm -f "$QFILE"' EXIT
 # （= Pipes 経路は入口の遅れを CloudWatch では観測できない。方式比較の論点として記録する）。
 ROUTER_Q=""
 if [[ -n "$ROUTER" && "$ROUTER" != "None" ]]; then
-  ROUTER_Q=",{\"Id\":\"m14\",\"Label\":\"RouterIteratorAgeMs\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"IteratorAge\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
+  # m14 IteratorAge（入口遅れ）、m15 ConcurrentExecutions（S×P の壁の可視化。
+  # 中継 Lambda は Streams を ESM で読むため同時実行が S×P に張り付く）。
+  ROUTER_Q=",{\"Id\":\"m14\",\"Label\":\"RouterIteratorAgeMs\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"IteratorAge\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},{\"Id\":\"m15\",\"Label\":\"RouterConcurrent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"ConcurrentExecutions\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
 fi
 
 printf '%s' "[\

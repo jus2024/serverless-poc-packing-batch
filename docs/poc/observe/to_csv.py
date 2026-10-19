@@ -28,6 +28,7 @@ COLUMNS = [
     ("UnitWriteThrottle", "unit_write_throttle_sum"),
     ("RoastBatchWCU", "roast_batch_wcu_sum"),
     ("RouterIteratorAgeMs", "router_iterator_age_ms_max"),
+    ("RouterConcurrent", "router_concurrent_max"),
 ]
 # 1000 多重の立ち上がりを測る到達しきい値
 RAMP_TARGETS = [100, 250, 500, 750, 900, 1000]
@@ -118,6 +119,9 @@ def main() -> None:
              else "  ← 送信と削除に差（処理中/未処理が残っている可能性）"))
     if router_age:
         print(f"中継 Lambda IteratorAge (最大): {max(router_age):g} ms  ← 方式 A-Lambda の入口遅れ")
+    router_conc = [v for v in series["RouterConcurrent"].values() if v is not None]
+    if router_conc:
+        print(f"中継 Lambda 同時実行 (最大): {max(router_conc):g}  ← S×P の壁（供給レートの天井）")
     print("────────────────────────────────────────────")
 
 
