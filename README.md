@@ -9,6 +9,35 @@ Lambda を最大 1,000 多重まで張り付かせて一斉に捌けるか**を�
 に分離して共存します（既存の Todo / サンプルページは変更・削除しません）。テンプレート自体の
 使い方は末尾の[テンプレートについて](#テンプレートについて)を参照してください。
 
+## 2 層モード（業務モード / 検証モード）
+
+トップページ（`src/app/page.tsx`）は **業務モード（既定）** と **検証モード** の 2 層ナビで
+構成されます。両モードは常時マウントし表示だけを切り替えます（非表示側のモニタはポーリングを
+止めて過剰ポーリングを抑止します）。
+
+- **業務モード（既定）**: 現場オペレーター向けの業務 4 画面。Kiro Roasters のブランドヘッダー
+  （`BrandIcon` + 店名）を先頭に出します。
+  - **焙煎担当**: 焙煎計画（`PLANNED`）の一覧から、完了したバッチを複数選択で「焙煎完了を記録」する。
+  - **梱包担当**: 付番待ち（`ROASTING_DONE`）/ 付番中（`LABELING`）の一覧。[付番開始]（= 約 1,000
+    個体を一括投入する**検証トリガー**）とモニタ導線。
+  - **ライン監督**: 付番モニタ。進捗（`labeled_count` ベース）・付番レート（件/分）・同時実行
+    （pinned 1000 + `GET /config` の実値）・プリンタ能力 500 枚/分との大小でボトルネック判定。
+  - **QC・出荷**: 出荷可能（`LABELED`）一覧と個体トレース（バッチ / ロット起点のリコール照会）。
+- **検証モード**: 既存の付番検証ダッシュボード（画面 A〜D）。見た目・情報設計は従来どおり不変です。
+
+### 業務フロー（起点 = 焙煎計画）
+
+```
+焙煎計画 SEED（PLANNED・初期データ）
+  → 焙煎担当が複数選択で「焙煎完了を記録」 → ROASTING_DONE
+    → 梱包担当が [付番開始]（検証トリガー）→ LABELING（約 1,000 個体を一括投入）
+      → 付番ワーカーが多重処理 → LABELED
+        → QC が出荷準備・個体トレース
+```
+
+焙煎計画は「既に存在するもの」という前提で、画面では入力せず **初期データ**として持ちます。
+投入は専用 Lambda `plan-seeder` の手動 invoke で行います（[焙煎計画 SEED の投入](#焙煎計画-seed-の投入plan-seeder)）。
+
 ## 中心的な問い
 
 1. Streams に滞留した個体を **SQS で受ければ、後続処理の同時実行を Streams のシャード数から
@@ -37,6 +66,10 @@ LOT#2026-10-01-003          BATCH#2026-10-09-AM-01            UNIT#2026-10-09-AM
   Streams は `NEW_IMAGE`、課金はオンデマンド。
 - **RoastBatch**（`kiro-roasters-roast-batch`）: 投入指示と完了集計。PK は `batch_id` 単独。
   `unit_count`（投入数）と `labeled_count`（付番完了数）で完了を判定する。Streams なし。
+  status は業務フローに沿って `PLANNED`（焙煎前・焙煎計画）→ `ROASTING_DONE`（焙煎完了・付番待ち）
+  → `LABELING`（付番中）→ `LABELED`（付番完了）の 4 値。`PLANNED → ROASTING_DONE` は焙煎担当画面
+  からの一括記録 API（`POST /batches/roasting-complete`）が roast-batch への条件付き `UpdateItem`
+  のみで行い、Unit テーブル（Streams）には一切波及しません。
 - **Lot**: 参照のみ（テーブルは作らず Unit の属性として持つ）。
 
 ## 構成図
@@ -95,15 +128,20 @@ amplify/
     labeling-alarms.ts      #  アラーム + SNS トピック
   functions/
     seeder/               # 焙煎完成を模し Unit を約 1,000 件一括 INSERT
+    plan-seeder/          # 焙煎計画 SEED（roast-batch に 10 件を PLANNED で投入・手動 invoke）
     labeling-router/      # 中継 Lambda（Streams ESM → SQS、INSERT ガード）
     labeling-worker/      # 付番ワーカー（冪等 UpdateItem・完了検知）
-    labeling-api/         # 画面 A〜D 向け REST ハンドラ
+    labeling-api/         # 画面 A〜D + 焙煎完了一括記録（POST /batches/roasting-complete）
     shared/               # 共有モジュール（unit-keys / runtime-config / ddb / http 等）
   backend.ts              # createStack('SqsLabelingPoc') で検証スタックを分離・配線
 src/
-  app/page.tsx            # トップページ = 付番検証ダッシュボード（タブ構成）
-  components/labeling/    # 画面 A〜D（登録 / 付番開始 / 進捗モニタ / トレース照会）
-  lib/labeling/           # API クライアント・進捗算術
+  app/page.tsx            # トップページ = 業務モード（既定）/ 検証モードの 2 層ダッシュボード
+  app/icon.png            # ファビコン（public/brand の 256 版をコピー）
+  components/common/      # BrandIcon（ブランドアイコン。業務モードヘッダーで使用）
+  components/labeling/    # 検証 A〜D + ModeSwitcher
+    business/             #   業務 4 画面（焙煎担当 / 梱包担当 / ライン監督 / QC）
+  lib/labeling/           # API クライアント・進捗算術・製品マスタ・稼働メトリクス
+public/brand/             # ブランドアセット（kiro-roasters-icon-256.png / kiro-roasters-icon.png）
 .kiro/specs/sqs-labeling-poc/   # requirements / design / tasks（仕様駆動の成果物）
 ```
 
@@ -133,10 +171,41 @@ npx ampx sandbox
 npm run dev
 ```
 
-`http://localhost:3000` にログイン（Cognito）すると付番検証ダッシュボード（画面 A〜D）が開きます。
+`http://localhost:3000` にログイン（Cognito）すると業務モード（既定）のダッシュボードが開きます。
+検証モードはモード切替タブで表示できます。
 
 > `amplify_outputs.json` は sandbox が生成するローカルファイルでコミット対象外です。
 > `.env.local` も同様にコミットしません（シークレットや環境固有値をリポジトリに含めない）。
+
+### 焙煎計画 SEED の投入（plan-seeder）
+
+業務フローの起点である焙煎計画は初期データとして持ちます。デプロイ後、専用 Lambda
+`plan-seeder` を**手動 invoke** して roast-batch に 10 件（`status=PLANNED`）を投入します。
+固定 `batch_id` と各レコードの条件付き `PutItem`（`attribute_not_exists(batch_id)`）により
+**冪等**で、再投入しても既存の進行中状態を巻き戻しません（Unit テーブルには触れないため
+Streams 流入はゼロ）。
+
+```bash
+# 物理関数名のサフィックスはデプロイ出力（スタックの関数一覧）で確認する
+aws lambda invoke \
+  --function-name kiro-roasters-labeling-plan-seeder-<suffix> \
+  --payload '{}' /dev/stdout
+# 戻り値 { "inserted": [...], "skipped": [...] } で投入結果を確認できる
+```
+
+投入後、業務モードの焙煎担当画面に `PLANNED` のバッチが並び、焙煎完了の記録ができます。
+シークレットはコード/ペイロードに含めません（テーブル名は環境変数、認証は Lambda 実行ロール）。
+
+### ブランドアセット
+
+業務モードは Kiro Roasters のブランド（ヘッダーの `BrandIcon`・差し替え済みファビコン）を使います。
+画像の実体は 3 箇所に配置しており、差し替え時は三者を揃えて更新してください。
+
+| パス | 用途 |
+|------|------|
+| `public/brand/kiro-roasters-icon-256.png` | Web 表示用の軽量版（`BrandIcon` が参照） |
+| `public/brand/kiro-roasters-icon.png` | 高解像度版（元データ・再書き出し用） |
+| `src/app/icon.png` | ファビコン（256 版をコピー） |
 
 ## 検証シナリオ
 
@@ -209,6 +278,12 @@ Lambda、Pipes、ダッシュボード、アラーム）が一括破棄されま
 
 ## デプロイ影響
 
+- **業務モード追加の影響レイヤーはフロント / Amplify バックエンド / ドキュメントに閉じ、
+  検証コアは未変更です。** 追加は PLANNED ステータス・焙煎完了一括記録 API
+  （`POST /batches/roasting-complete`）・独立した `plan-seeder`・業務 4 画面と 2 層ナビです。
+  Streams → SQS → worker の 1,000 多重、入口 2 方式（Pipes / router）、`MaximumConcurrency` の
+  定義には一切手を入れていません。`PLANNED → ROASTING_DONE` は roast-batch への条件付き
+  `UpdateItem` のみで、Unit テーブル（Streams）・SQS・worker には波及しません。
 - **CI のみに影響し、Amplify Hosting / AgentCore には波及しません。** 本 PoC では CI の
   `setup-node` を Node.js 22 に引き上げ（Lambda ランタイム 22.x と揃える）、vitest による
   テスト実行を CI に追加します。Web アプリのホスティングやエージェント実行基盤の構成は変わりません。
