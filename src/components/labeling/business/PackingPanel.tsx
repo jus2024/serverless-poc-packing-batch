@@ -135,7 +135,7 @@ export default function PackingPanel({ onMonitor }: PackingPanelProps) {
 
       <div className={styles.inlineForm}>
         <button
-          className={styles.secondaryButton}
+          className={styles.bizButton}
           type="button"
           onClick={() => load()}
           disabled={loading}
@@ -164,7 +164,7 @@ export default function PackingPanel({ onMonitor }: PackingPanelProps) {
             renderCard(
               b,
               <button
-                className={styles.secondaryButton}
+                className={styles.bizButton}
                 type="button"
                 onClick={() => handleStart(b.batch_id)}
                 disabled={startingId === b.batch_id}
@@ -177,7 +177,7 @@ export default function PackingPanel({ onMonitor }: PackingPanelProps) {
         </ul>
       )}
 
-      <h3 className={styles.summaryLabel} style={{ marginTop: "1.25rem" }}>
+      <h3 className={`${styles.summaryLabel} ${styles.spaceTopLg}`}>
         付番中（LABELING）
       </h3>
       {inProgress.length === 0 && !loading ? (
@@ -188,7 +188,7 @@ export default function PackingPanel({ onMonitor }: PackingPanelProps) {
             renderCard(
               b,
               <button
-                className={styles.secondaryButton}
+                className={styles.bizButton}
                 type="button"
                 onClick={() => onMonitor(b.batch_id)}
                 aria-label={`${b.batch_id} のモニタを見る`}

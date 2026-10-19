@@ -194,9 +194,8 @@ export default function LineMonitorPanel({
 
             {complete ? (
               <div
-                className={styles.success}
+                className={`${styles.success} ${styles.spaceTopMd}`}
                 role="status"
-                style={{ marginTop: "1rem" }}
               >
                 付番完了（status: LABELED
                 {batch.labeling_finished_at
@@ -214,7 +213,7 @@ export default function LineMonitorPanel({
                 </span>
               </div>
             ) : (
-              <p className={styles.hint} style={{ marginTop: "0.75rem" }}>
+              <p className={`${styles.hint} ${styles.spaceTopSm}`}>
                 判定: {VERDICT_TEXT[verdict]}
                 {verdict === "WITHIN_CAPACITY" &&
                   `（付番 ${Math.round(ratePerMin)} 件/分 <= プリンタ ${PRINTER_CAPACITY_PER_MIN} 枚/分）`}
@@ -222,7 +221,7 @@ export default function LineMonitorPanel({
             )}
           </div>
 
-          <dl className={styles.summaryGrid} style={{ marginTop: "1rem" }}>
+          <dl className={`${styles.summaryGrid} ${styles.spaceTopMd}`}>
             <div className={styles.summaryItem}>
               <dt className={styles.summaryLabel}>
                 SQS バックログ（CloudWatch 非取得）
@@ -239,7 +238,7 @@ export default function LineMonitorPanel({
             </div>
           </dl>
 
-          <p className={styles.hint} style={{ marginTop: "0.75rem" }}>
+          <p className={`${styles.hint} ${styles.spaceTopSm}`}>
             ポーリング: {isPolling ? "稼働中" : "停止"}（完了で自動停止）。
             同時実行は pinned {PINNED_WORKER_CONCURRENCY}（フロント固定）／実値 config:{" "}
             {maxConcurrency ?? "—"}。

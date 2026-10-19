@@ -127,7 +127,7 @@ export default function RoastingPanel() {
 
       <div className={styles.inlineForm}>
         <button
-          className={styles.secondaryButton}
+          className={styles.bizButton}
           type="button"
           onClick={selectAll}
           disabled={batches.length === 0}
@@ -135,7 +135,7 @@ export default function RoastingPanel() {
           全選択
         </button>
         <button
-          className={styles.secondaryButton}
+          className={styles.bizButton}
           type="button"
           onClick={clearAll}
           disabled={selected.size === 0}
@@ -143,7 +143,7 @@ export default function RoastingPanel() {
           全解除
         </button>
         <button
-          className={styles.secondaryButton}
+          className={styles.bizButton}
           type="button"
           onClick={() => load()}
           disabled={loading}
@@ -193,18 +193,20 @@ export default function RoastingPanel() {
                   isSelected ? styles.cardSelected : ""
                 }`}
               >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => toggle(b.batch_id)}
-                  aria-label={ariaLabel}
-                />
-                <span title={b.item_id}>
-                  <strong>{label.origin}</strong> / {label.roast}
-                  {!label.isKnown && (
-                    <span className={styles.unknownBadge}>未登録</span>
-                  )}
-                </span>
+                <label className={styles.checkOption}>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggle(b.batch_id)}
+                    aria-label={ariaLabel}
+                  />
+                  <span title={b.item_id}>
+                    <strong>{label.origin}</strong> / {label.roast}
+                    {!label.isKnown && (
+                      <span className={styles.unknownBadge}>未登録</span>
+                    )}
+                  </span>
+                </label>
                 <span className={styles.mono}>{b.lot_id}</span>
                 <span>{b.roast_date}</span>
                 <span>{amPmOf(b.batch_id)}</span>

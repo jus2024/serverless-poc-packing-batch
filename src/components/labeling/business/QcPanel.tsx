@@ -110,7 +110,7 @@ export default function QcPanel() {
 
       <div className={styles.inlineForm}>
         <button
-          className={styles.secondaryButton}
+          className={styles.bizButton}
           type="button"
           onClick={() => load()}
           disabled={loading}
@@ -133,7 +133,7 @@ export default function QcPanel() {
             const label = resolveProductLabel(b.item_id);
             return (
               <li key={b.batch_id} className={styles.card}>
-                <div className={styles.listRow} style={{ border: "none", padding: 0 }}>
+                <div className={`${styles.listRow} ${styles.listRowFlush}`}>
                   <span title={b.item_id}>
                     <strong>{label.origin}</strong> / {label.roast}
                     {!label.isKnown && (
@@ -146,7 +146,7 @@ export default function QcPanel() {
                 </div>
                 <div className={styles.actions}>
                   <button
-                    className={styles.secondaryButton}
+                    className={styles.bizButton}
                     type="button"
                     onClick={() => traceFromCard("batch", b.batch_id)}
                     aria-label={`${b.batch_id} の個体トレースを開く`}
@@ -154,7 +154,7 @@ export default function QcPanel() {
                     トレース/出荷確認を開く
                   </button>{" "}
                   <button
-                    className={styles.secondaryButton}
+                    className={styles.bizButton}
                     type="button"
                     onClick={() => traceFromCard("lot", b.lot_id)}
                     aria-label={`${b.lot_id} のロット照会（リコール）を開く`}
@@ -168,7 +168,7 @@ export default function QcPanel() {
         </ul>
       )}
 
-      <h3 className={styles.summaryLabel} style={{ marginTop: "1.5rem" }}>
+      <h3 className={`${styles.summaryLabel} ${styles.spaceTopXl}`}>
         個体トレース照会
       </h3>
       <div className={styles.inlineForm}>
@@ -207,7 +207,7 @@ export default function QcPanel() {
           )}
         </div>
         <button
-          className={styles.secondaryButton}
+          className={styles.bizButton}
           type="button"
           onClick={() => runTrace(traceBy, traceKey)}
           disabled={tracing}

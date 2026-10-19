@@ -540,3 +540,87 @@
     color: #fcd34d;
   }
 }
+
+/* ─── 業務モード: 静的スペーシング/枠線のユーティリティ（BLOCK-4）────────
+   以前は業務コンポーネント（PackingPanel / QcPanel / LineMonitorPanel）の TSX に
+   固定の margin / border / padding を inline style で持たせていたが、承認済みの
+   「CSS Modules のみ」境界に沿って名前付きクラスへ寄せる。実行時データで変わる
+   進捗バー幅（width: n%）は本質的に動的なため inline のまま残す。 */
+.spaceTopSm {
+  margin-top: 0.75rem;
+}
+
+.spaceTopMd {
+  margin-top: 1rem;
+}
+
+.spaceTopLg {
+  margin-top: 1.25rem;
+}
+
+.spaceTopXl {
+  margin-top: 1.5rem;
+}
+
+/* カード内に入れ子にする listRow（外周カードが枠・余白を持つため自身は枠なし） */
+.listRowFlush {
+  border: none;
+  padding: 0;
+}
+
+/* ─── 業務モード: 44px 以上のタップ領域（BLOCK-5 / design §9 WCAG 2.1 AA）────────
+   検証画面（画面 A〜D）が使う .secondaryButton（min-height: 40px）は変更しない。
+   現場のタッチ操作を保証するため、業務画面専用に 44px 以上のボタンと、44px 以上の
+   クリック領域を持つ checkbox ラベルを足す。 */
+.bizButton {
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  background: none;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius);
+  color: var(--color-primary);
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.bizButton:hover:not(:disabled) {
+  background-color: var(--color-primary);
+  color: #fff;
+}
+
+.bizButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.bizButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 焙煎完了記録の選択チェックボックス: ラベル全体を 44px 以上のクリック領域にする */
+.checkOption {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.checkOption:hover {
+  background-color: var(--color-surface);
+}
+
+.checkOption input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  cursor: pointer;
+}
+
+.checkOption:focus-within {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
