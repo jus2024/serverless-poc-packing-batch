@@ -168,6 +168,8 @@ export class LabelingFunctions extends Construct {
         [envKeys.unitTableName]: tableEnv[envKeys.unitTableName],
         [envKeys.roastBatchTableName]: tableEnv[envKeys.roastBatchTableName],
         SEED_UNIT_COUNT_MAX: String(config.seedUnitCountMax),
+        // BatchWriteItem の並列度（最速投入・T2 観測用。既定 1＝直列）
+        SEED_WRITE_CONCURRENCY: process.env.SEED_WRITE_CONCURRENCY ?? "1",
       },
     });
 

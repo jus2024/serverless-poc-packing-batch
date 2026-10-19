@@ -18,6 +18,7 @@ import { getDocClient } from "../shared/ddb.js";
 import {
   resolveTableNames,
   resolveVerificationConfig,
+  resolveSeedWriteConcurrency,
   RuntimeConfigError,
 } from "../shared/runtime-config.js";
 import type { RoastBatchRecord, UnitRecord } from "../shared/types.js";
@@ -100,8 +101,19 @@ export const handler = async (event: {
     created_at: new Date().toISOString(),
   });
 
-  // 3. 25 件ずつ BatchWriteItem（UnprocessedItems は指数バックオフ再送）
-  for (const c of chunks) {
-    await writeBatchWithRetry(tables.unitTableName, c);
+  // 3. 25 件ずつ BatchWriteItem（UnprocessedItems は指数バックオフ再送）。
+  //    SEED_WRITE_CONCURRENCY 本のワーカーでチャンクを並列消費する（既定 1 = 従来の直列）。
+  //    値を上げると unit テーブルへの瞬間書き込みレートが上がり、最速投入・T2 観測ができる。
+  const concurrency = resolveSeedWriteConcurrency();
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = next++;
+      if (i >= chunks.length) return;
+      await writeBatchWithRetry(tables.unitTableName, chunks[i]);
+    }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, chunks.length) }, () => worker()),
+  );
 };

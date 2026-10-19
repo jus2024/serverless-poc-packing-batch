@@ -5,6 +5,7 @@ import {
   resolveTableConfig,
   resolveTableNames,
   resolveVerificationConfig,
+  resolveSeedWriteConcurrency,
   BEST_BEFORE_DAYS_DEFAULT,
   SEED_UNIT_COUNT_MAX_DEFAULT,
 } from "./runtime-config.js";
@@ -61,6 +62,20 @@ describe("resolveTableNames（seeder / worker 用。GSI 名を要求しない）
   it("テーブル名の欠落は RuntimeConfigError", () => {
     expect(() =>
       resolveTableNames({ [ENV_KEYS.UNIT_TABLE_NAME]: "only-unit" }),
+    ).toThrow(RuntimeConfigError);
+  });
+});
+
+describe("resolveSeedWriteConcurrency（最速投入・T2 観測用）", () => {
+  it("未設定は既定 1（従来の直列書き込み）", () => {
+    expect(resolveSeedWriteConcurrency({})).toBe(1);
+  });
+  it("範囲内の値を解決する", () => {
+    expect(resolveSeedWriteConcurrency({ [ENV_KEYS.SEED_WRITE_CONCURRENCY]: "48" })).toBe(48);
+  });
+  it("範囲外（>48）は RuntimeConfigError", () => {
+    expect(() =>
+      resolveSeedWriteConcurrency({ [ENV_KEYS.SEED_WRITE_CONCURRENCY]: "49" }),
     ).toThrow(RuntimeConfigError);
   });
 });

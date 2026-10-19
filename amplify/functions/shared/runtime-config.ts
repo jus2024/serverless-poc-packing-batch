@@ -38,6 +38,8 @@ export const ENV_KEYS = {
   LABELING_MAX_CONCURRENCY: "LABELING_MAX_CONCURRENCY",
   // worker の擬似処理時間（R5 / T1 観測用。既定 0）
   PROCESSING_TIME_MS: "PROCESSING_TIME_MS",
+  // seeder の BatchWriteItem 並列度（最速投入・T2 観測用。既定 1＝従来の直列）
+  SEED_WRITE_CONCURRENCY: "SEED_WRITE_CONCURRENCY",
 } as const;
 
 /** 検証パラメータの既定・範囲（design §4.1 の表。実行時側で使う分のみ）。 */
@@ -53,6 +55,26 @@ export const SEED_UNIT_COUNT_MAX_MAX = 5000;
 export const PROCESSING_TIME_MS_DEFAULT = 0;
 export const PROCESSING_TIME_MS_MIN = 0;
 export const PROCESSING_TIME_MS_MAX = 60000;
+
+/**
+ * seeder の BatchWriteItem 並列度（最速投入・T2 観測用）。
+ * 既定 1 = 従来どおり 25 件チャンクを直列書き込み。値を上げると複数チャンクを同時に投げ、
+ * unit テーブルへの瞬間書き込みレートが上がる（オンデマンドの初動スロットル T2 を狙える）。
+ * 上限 48 は 1 バッチ 1,200 件 ÷ 25 件チャンク = 48 チャンクを一斉に投げられる値。
+ */
+export const SEED_WRITE_CONCURRENCY_DEFAULT = 1;
+export const SEED_WRITE_CONCURRENCY_MIN = 1;
+export const SEED_WRITE_CONCURRENCY_MAX = 48;
+
+export function resolveSeedWriteConcurrency(env: EnvSource = process.env): number {
+  return resolveIntInRange(
+    env,
+    ENV_KEYS.SEED_WRITE_CONCURRENCY,
+    SEED_WRITE_CONCURRENCY_DEFAULT,
+    SEED_WRITE_CONCURRENCY_MIN,
+    SEED_WRITE_CONCURRENCY_MAX,
+  );
+}
 
 /** 環境変数ソース（テスト容易性のため注入可能にする）。 */
 export type EnvSource = Record<string, string | undefined>;
