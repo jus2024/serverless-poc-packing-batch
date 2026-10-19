@@ -311,6 +311,31 @@ describe("合成/実行時キー名の突き合わせ（design §6.6 / §16）",
   });
 });
 
+describe("LabelingFunctions — plan-seeder（焙煎計画 SEED。§4.2 / §4.4）", () => {
+  it("plan-seeder が roast-batch 限定の dynamodb:PutItem 権限を持つ", () => {
+    const { template } = buildStack();
+    // roast-batch 限定の PutItem（BatchWriteItem/GetItem は付けない。最小権限）
+    template.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: "dynamodb:PutItem",
+            Effect: "Allow",
+          }),
+        ]),
+      },
+    });
+  });
+
+  it("plan-seeder 追加後も Pipe/ESM 個数は不変（イベントソースを持たない）", () => {
+    // plan-seeder は Streams/SQS/Pipes に接続しないため、RELAY_MODE=both の
+    // Pipe 1 本・ESM 2 本（router+worker）は不変で通る。
+    const { template } = buildStack({ relayMode: "both" });
+    template.resourceCountIs("AWS::Pipes::Pipe", 1);
+    template.resourceCountIs("AWS::Lambda::EventSourceMapping", 2);
+  });
+});
+
 describe("合成全体 — 循環参照なし", () => {
   it("スタック全体が合成でき循環参照にならない", () => {
     expect(() => buildStack({ relayMode: "both" }).template.toJSON()).not.toThrow();

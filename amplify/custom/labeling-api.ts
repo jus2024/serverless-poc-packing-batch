@@ -53,7 +53,7 @@ export interface LabelingApiRoute {
 }
 
 /**
- * design §4.4 のルート表そのもの（全 6 ルート。これが唯一の出典）。
+ * design §4.4 / §3.2 のルート表そのもの（全 7 ルート。これが唯一の出典）。
  *
  * `POST /batches/{batchId}/labeling-start` は条件付き遷移成功時に seeder を**非同期 invoke**
  * して即 202 を返す（要件 1.1 / 9.2。決定 2）。API Gateway の統合タイムアウトは上限 29 秒で、
@@ -69,6 +69,8 @@ export const LABELING_API_ROUTES: readonly LabelingApiRoute[] = [
   { method: "GET", path: "/batches/{batchId}", handler: "api" },
   // 画面 B: [付番開始]→条件付き遷移後に seeder 非同期 invoke（要件 1.1 / 9.2）
   { method: "POST", path: "/batches/{batchId}/labeling-start", handler: "api" },
+  // 業務: 焙煎完了の一括記録（PLANNED → ROASTING_DONE。要件 B3。§3.2）
+  { method: "POST", path: "/batches/roasting-complete", handler: "api" },
   // 画面 D: GSI Query（?batchId= / ?lotId=。要件 11.1 / 11.2）
   { method: "GET", path: "/units", handler: "api" },
   // デプロイ済み検証パラメータの確認（非機能 5）

@@ -23,6 +23,12 @@ import {
   SEEDER_MEMORY_MB,
 } from "../functions/seeder/resource.js";
 import {
+  PLAN_SEEDER_ENTRY,
+  PLAN_SEEDER_HANDLER,
+  PLAN_SEEDER_TIMEOUT_SECONDS,
+  PLAN_SEEDER_MEMORY_MB,
+} from "../functions/plan-seeder/resource.js";
+import {
   ROUTER_ENTRY,
   ROUTER_HANDLER,
   ROUTER_TIMEOUT_SECONDS,
@@ -92,6 +98,7 @@ export const LABELING_FUNCTION_LOGICAL_NAMES = {
   router: "labeling-router",
   worker: "labeling-worker",
   api: "labeling-api",
+  planSeeder: "labeling-plan-seeder",
 } as const;
 
 export interface LabelingFunctionsProps {
@@ -134,8 +141,14 @@ export class LabelingFunctions extends Construct {
   /** 付番ワーカー（要件 3〜5）。`labeling-stream.ts` が SQS ESM を繋ぐ */
   readonly worker: NodejsFunction;
 
-  /** 画面 A〜D の API（§4.4 の 6 ルート）。`labeling-api.ts` が API Gateway を繋ぐ */
+  /** 画面 A〜D の API（§4.4 の 7 ルート）。`labeling-api.ts` が API Gateway を繋ぐ */
   readonly api: NodejsFunction;
+
+  /**
+   * 焙煎計画 SEED（roast-batch に 10 件を PLANNED で投入。要件 B2）。手動 invoke 専用で
+   * イベントソースを持たない（Streams/SQS/Pipes に接続しない。既存 seeder とは完全に独立。§4.2）。
+   */
+  readonly planSeeder: NodejsFunction;
 
   private readonly tables: LabelingTables;
   private readonly functionName: (logicalName: string) => string;
@@ -232,9 +245,28 @@ export class LabelingFunctions extends Construct {
       },
     });
 
+    // plan-seeder: roast-batch テーブル名のみ（焙煎計画 SEED 10 件の条件付き PutItem。§4.2）。
+    // イベントソース・API 統合は付けない（手動 invoke。backend.ts 変更不要）
+    this.planSeeder = new NodejsFunction(this, "PlanSeeder", {
+      functionName: this.functionName(
+        LABELING_FUNCTION_LOGICAL_NAMES.planSeeder,
+      ),
+      entry: PLAN_SEEDER_ENTRY,
+      handler: PLAN_SEEDER_HANDLER,
+      runtime: Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(PLAN_SEEDER_TIMEOUT_SECONDS),
+      memorySize: PLAN_SEEDER_MEMORY_MB,
+      bundling: BUNDLING,
+      environment: {
+        ...baseEnv,
+        [envKeys.roastBatchTableName]: tableEnv[envKeys.roastBatchTableName],
+      },
+    });
+
     this.grantSeederPermissions();
     this.grantWorkerPermissions();
     this.grantApiPermissions();
+    this.grantPlanSeederPermissions();
     // router は SQS SendMessage を持つが、SQS は `labeling-stream.ts` 作成後に
     // そちらが queue.grantSendMessages 相当を PolicyStatement で付与する（循環回避）
   }
@@ -358,6 +390,27 @@ export class LabelingFunctions extends Construct {
           `${unitTable.tableArn}/index/${this.tables.batchUnitsIndexName}`,
           `${unitTable.tableArn}/index/${this.tables.lotTraceIndexName}`,
         ],
+      }),
+    );
+  }
+
+  /**
+   * plan-seeder の IAM 権限（design §4.2 / §4.4）。
+   * - roast-batch: `PutItem` のみ（焙煎計画 10 件の条件付き投入。`ConditionExpression` に
+   *   追加権限は不要）。`BatchWriteItem`/`GetItem` は付けない（§4.4 で冪等性を条件付き
+   *   `PutItem` に寄せたため不要。最小権限）。
+   *
+   * unit テーブル・GSI には権限を付けない（plan-seeder は roast-batch にしか書かず、
+   * Streams 流入をゼロに保つ。要件 B2-6）。`grant*` ヘルパーは使わない（既存方針）。
+   */
+  private grantPlanSeederPermissions(): void {
+    const { roastBatchTable } = this.tables;
+
+    this.planSeeder.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ["dynamodb:PutItem"],
+        resources: [roastBatchTable.tableArn],
       }),
     );
   }

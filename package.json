@@ -32,6 +32,7 @@
     "@aws-sdk/client-lambda": "3.1014.0",
     "@aws-sdk/client-sqs": "3.1014.0",
     "@aws-sdk/lib-dynamodb": "3.1014.0",
+    "@aws-sdk/util-dynamodb": "3.996.9",
     "@eslint/eslintrc": "^3.3.5",
     "@types/aws-lambda": "8.10.164",
     "@types/node": "^22.19.15",

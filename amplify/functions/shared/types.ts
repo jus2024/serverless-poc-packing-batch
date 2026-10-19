@@ -7,10 +7,14 @@
  */
 
 /**
- * RoastBatch の status（design §3.2）。
- * ROASTING_DONE（焙煎完了・付番待ち）→ LABELING（付番中）→ LABELED（付番完了）。
+ * RoastBatch の status（design §2.1 / §3.2）。
+ * PLANNED（焙煎前・焙煎計画）→ ROASTING_DONE（焙煎完了・付番待ち）→ LABELING（付番中）→ LABELED（付番完了）。
  */
-export type RoastBatchStatus = "ROASTING_DONE" | "LABELING" | "LABELED";
+export type RoastBatchStatus =
+  | "PLANNED"
+  | "ROASTING_DONE"
+  | "LABELING"
+  | "LABELED";
 
 /**
  * Unit の status（design §3.1）。PENDING（投入直後）→ LABELED（付番済み）。
@@ -86,4 +90,24 @@ export interface CreateBatchInput {
  */
 export interface SeederInvokePayload {
   batch_id: string;
+}
+
+/**
+ * `POST /batches/roasting-complete` の入力（design §3.3 / 要件 B3）。
+ * 焙煎担当が複数バッチをまとめて焙煎完了（PLANNED → ROASTING_DONE）にする。
+ */
+export interface RoastingCompleteInput {
+  batch_ids: string[];
+}
+
+/**
+ * `POST /batches/roasting-complete` の 200 レスポンス（design §3.3）。
+ * 部分成功を 4 配列で区別する。要素はいずれも正規化済み（`BATCH#` 接頭辞付き）の batch_id。
+ * 4 配列の和は入力 dedupe 後の件数に一致する。
+ */
+export interface RoastingCompleteResponse {
+  completed: string[]; // PLANNED → ROASTING_DONE に遷移できたもの
+  skipped: string[]; // 既に ROASTING_DONE（冪等スキップ）
+  not_found: string[]; // 存在しない batch_id
+  invalid: string[]; // LABELING/LABELED など PLANNED 以外からの不正遷移
 }

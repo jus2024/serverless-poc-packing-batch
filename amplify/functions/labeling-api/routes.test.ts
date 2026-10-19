@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { routeRequest, DEFAULT_UNIT_COUNT, type RouteRequest } from "./routes.js";
+import {
+  routeRequest,
+  DEFAULT_UNIT_COUNT,
+  ROASTING_COMPLETE_MAX_BATCHES,
+  type RouteRequest,
+} from "./routes.js";
 import { HttpError } from "../shared/http.js";
 
 /**
@@ -115,7 +120,8 @@ describe("routeRequest: GET /batches ?status=（画面 B）", () => {
     expect(routeRequest(req())).toEqual({ kind: "listBatches", status: "ROASTING_DONE" });
   });
 
-  it("許容 3 値を受理する", () => {
+  it("許容 4 値を受理する", () => {
+    expect(routeRequest(req("PLANNED"))).toMatchObject({ status: "PLANNED" });
     expect(routeRequest(req("LABELING"))).toMatchObject({ status: "LABELING" });
     expect(routeRequest(req("LABELED"))).toMatchObject({ status: "LABELED" });
     expect(routeRequest(req("ROASTING_DONE"))).toMatchObject({ status: "ROASTING_DONE" });
@@ -201,6 +207,96 @@ describe("routeRequest: POST /labeling-start（二重起動抑止・画面 B）"
       kind: "startLabeling",
       batch_id: "BATCH#2026-10-09-AM-01",
     });
+  });
+});
+
+describe("routeRequest: POST /batches/roasting-complete（焙煎完了一括記録。§3.4）", () => {
+  const req = (body: unknown): RouteRequest => ({
+    httpMethod: "POST",
+    resource: "/batches/roasting-complete",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  it("複数 batch_ids を roastingComplete アクションにする（正規化済み）", () => {
+    const action = routeRequest(
+      req({
+        batch_ids: ["BATCH#2026-02-10-AM-01", "BATCH#2026-02-10-AM-02"],
+      }),
+    );
+    expect(action).toEqual({
+      kind: "roastingComplete",
+      batch_ids: ["BATCH#2026-02-10-AM-01", "BATCH#2026-02-10-AM-02"],
+    });
+  });
+
+  it("BATCH# 無しの要素に接頭辞を補う（ensureBatchId 正規化）", () => {
+    const action = routeRequest(req({ batch_ids: ["2026-02-10-AM-01"] }));
+    expect(action).toEqual({
+      kind: "roastingComplete",
+      batch_ids: ["BATCH#2026-02-10-AM-01"],
+    });
+  });
+
+  it("正規化後に dedupe する（接頭辞有無違いの実体重複も除去）", () => {
+    const action = routeRequest(
+      req({
+        batch_ids: [
+          "BATCH#2026-02-10-AM-01",
+          "2026-02-10-AM-01",
+          "BATCH#2026-02-10-AM-02",
+        ],
+      }),
+    );
+    expect(action).toEqual({
+      kind: "roastingComplete",
+      batch_ids: ["BATCH#2026-02-10-AM-01", "BATCH#2026-02-10-AM-02"],
+    });
+  });
+
+  it("batch_ids が配列でなければ 400", () => {
+    expect(() => routeRequest(req({ batch_ids: "BATCH#x" }))).toThrowError(
+      expect.objectContaining({ statusCode: 400 }),
+    );
+  });
+
+  it("空配列は 400", () => {
+    expect(() => routeRequest(req({ batch_ids: [] }))).toThrowError(
+      expect.objectContaining({ statusCode: 400 }),
+    );
+  });
+
+  it("上限 100 件超過は 400", () => {
+    const tooMany = Array.from(
+      { length: ROASTING_COMPLETE_MAX_BATCHES + 1 },
+      (_, i) => `BATCH#b-${i}`,
+    );
+    expect(() => routeRequest(req({ batch_ids: tooMany }))).toThrowError(
+      expect.objectContaining({ statusCode: 400 }),
+    );
+  });
+
+  it("上限 100 件ちょうどは受理する", () => {
+    const exactly = Array.from(
+      { length: ROASTING_COMPLETE_MAX_BATCHES },
+      (_, i) => `BATCH#b-${i}`,
+    );
+    const action = routeRequest(req({ batch_ids: exactly }));
+    expect(action).toMatchObject({ kind: "roastingComplete" });
+    expect((action as { batch_ids: string[] }).batch_ids).toHaveLength(
+      ROASTING_COMPLETE_MAX_BATCHES,
+    );
+  });
+
+  it("非文字列要素を含む配列は全体を 400（部分受理しない）", () => {
+    expect(() =>
+      routeRequest(req({ batch_ids: ["BATCH#2026-02-10-AM-01", 123] })),
+    ).toThrowError(expect.objectContaining({ statusCode: 400 }));
+  });
+
+  it("ボディ欠落は 400", () => {
+    expect(() => routeRequest(req(undefined))).toThrowError(
+      expect.objectContaining({ statusCode: 400 }),
+    );
   });
 });
 

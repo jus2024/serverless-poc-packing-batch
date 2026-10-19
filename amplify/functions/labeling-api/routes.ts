@@ -17,12 +17,13 @@ import {
 import { SEED_UNIT_COUNT_MAX_DEFAULT } from "../shared/runtime-config.js";
 import type { RoastBatchStatus } from "../shared/types.js";
 
-/** ルーティングで扱う 6 ルート（design §4.4）。 */
+/** ルーティングで扱う 7 ルート（design §4.4 / §3.4）。 */
 export type RouteKind =
   | "createBatch"
   | "listBatches"
   | "getBatch"
   | "startLabeling"
+  | "roastingComplete"
   | "listUnits"
   | "getConfig"
   | "options";
@@ -54,6 +55,15 @@ export interface StartLabelingAction {
   batch_id: string;
 }
 
+/**
+ * `POST /batches/roasting-complete`（複数バッチの焙煎完了一括記録。design §3.4）。
+ * `batch_ids` は `ensureBatchId` 正規化済み・dedupe 済み。
+ */
+export interface RoastingCompleteAction {
+  kind: "roastingComplete";
+  batch_ids: string[];
+}
+
 /** `GET /units?batchId=|lotId=`（排他）。 */
 export interface ListUnitsAction {
   kind: "listUnits";
@@ -76,12 +86,14 @@ export type RouteAction =
   | ListBatchesAction
   | GetBatchAction
   | StartLabelingAction
+  | RoastingCompleteAction
   | ListUnitsAction
   | GetConfigAction
   | OptionsAction;
 
-/** `GET /batches?status=` の許容値（design §4.4 / §14）。 */
+/** `GET /batches?status=` の許容値（design §2.2 / §4.4 / §14。PLANNED を追加）。 */
 export const ALLOWED_BATCH_STATUS: RoastBatchStatus[] = [
+  "PLANNED",
   "ROASTING_DONE",
   "LABELING",
   "LABELED",
@@ -89,6 +101,9 @@ export const ALLOWED_BATCH_STATUS: RoastBatchStatus[] = [
 
 /** `POST /batches` の unit_count 既定（design §6.4 / §14。補完は API 層が所有）。 */
 export const DEFAULT_UNIT_COUNT = 1000;
+
+/** `POST /batches/roasting-complete` の一括上限（design §3.4）。 */
+export const ROASTING_COMPLETE_MAX_BATCHES = 100;
 
 /**
  * ルーティング時の環境依存オプション（design §14）。
@@ -240,6 +255,53 @@ function validateListUnits(
 }
 
 /**
+ * `POST /batches/roasting-complete` の入力検証（design §3.4 / 要件 B3-6）。
+ *
+ * 処理順序は **typeof チェック → `ensureBatchId` 正規化 → dedupe** で一意に固定する（NIT-2）。
+ * 非文字列要素が 1 つでもあれば配列全体を 400 にする（部分受理しない）。`ensureBatchId` は
+ * 引数を `string` と型付けしており非文字列で実行時例外になるため、正規化前に typeof を全件確認する。
+ * クエリ値ではなくボディなので percent-decode は不要。
+ */
+function validateRoastingComplete(
+  body: string | null | undefined,
+): RoastingCompleteAction {
+  if (body === null || body === undefined || body === "") {
+    throw new HttpError(400, "BadRequest", "request body is required");
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    throw new HttpError(400, "BadRequest", "request body is not valid JSON");
+  }
+
+  const batchIds = parsed.batch_ids;
+  if (!Array.isArray(batchIds)) {
+    throw new HttpError(400, "BadRequest", "batch_ids must be an array");
+  }
+  if (batchIds.length === 0) {
+    throw new HttpError(400, "BadRequest", "batch_ids must not be empty");
+  }
+  if (batchIds.length > ROASTING_COMPLETE_MAX_BATCHES) {
+    throw new HttpError(
+      400,
+      "BadRequest",
+      `batch_ids must contain at most ${ROASTING_COMPLETE_MAX_BATCHES} items`,
+    );
+  }
+  // 1 つでも非文字列なら配列全体を 400（部分受理しない。ensureBatchId 呼び出し前に確認）
+  for (const raw of batchIds) {
+    if (typeof raw !== "string") {
+      throw new HttpError(400, "BadRequest", "each batch_id must be a string");
+    }
+  }
+  // 全要素が文字列であることを確認した後、正規化 → 正規化後に dedupe
+  const normalized = (batchIds as string[]).map((raw) => ensureBatchId(raw));
+  const deduped = Array.from(new Set(normalized));
+  return { kind: "roastingComplete", batch_ids: deduped };
+}
+
+/**
  * ルーティング + 入力検証（design §6.4 / §4.4）。handler が実行するアクションを返す。
  * 未知のルートは 404。
  *
@@ -271,6 +333,9 @@ export function routeRequest(req: RouteRequest, options: RouteOptions = {}): Rou
           batch_id: requireBatchIdPath(req.pathParameters),
         };
       }
+      break;
+    case "/batches/roasting-complete":
+      if (method === "POST") return validateRoastingComplete(req.body);
       break;
     case "/units":
       if (method === "GET") return validateListUnits(req.queryStringParameters);

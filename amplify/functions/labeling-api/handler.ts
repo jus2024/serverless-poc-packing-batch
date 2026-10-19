@@ -15,6 +15,7 @@ import {
   QueryCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
+import { unmarshall } from "@aws-sdk/util-dynamodb";
 import {
   LambdaClient,
   InvokeCommand,
@@ -34,6 +35,7 @@ import {
 } from "../shared/runtime-config.js";
 import type {
   RoastBatchRecord,
+  RoastingCompleteResponse,
   SeederInvokePayload,
 } from "../shared/types.js";
 import { routeRequest, type RouteAction } from "./routes.js";
@@ -185,6 +187,57 @@ async function execute(action: RouteAction): Promise<APIGatewayProxyResult> {
       });
     }
 
+    case "roastingComplete": {
+      // 複数バッチの焙煎完了一括記録（design §3.5 / 要件 B3）。
+      // 各 batch_id に条件付き UpdateItem(PLANNED → ROASTING_DONE) を逐次実行し、
+      // 結果を 4 配列に振り分ける（部分成功は HTTP 200）。遷移ガードの唯一の判定点は
+      // この条件式 attribute_exists(batch_id) AND #status = :planned。roast-batch は
+      // Streams 無効なので、この更新は Streams/SQS/worker に一切波及しない（要件 B3-7）。
+      const result: RoastingCompleteResponse = {
+        completed: [],
+        skipped: [],
+        not_found: [],
+        invalid: [],
+      };
+      for (const batchId of action.batch_ids) {
+        try {
+          await client.send(
+            new UpdateCommand({
+              TableName: tables.roastBatchTableName,
+              Key: { batch_id: batchId },
+              UpdateExpression: "SET #status = :roasting_done",
+              ConditionExpression:
+                "attribute_exists(batch_id) AND #status = :planned",
+              ExpressionAttributeNames: { "#status": "status" },
+              ExpressionAttributeValues: {
+                ":roasting_done": "ROASTING_DONE",
+                ":planned": "PLANNED",
+              },
+              ReturnValuesOnConditionCheckFailure: "ALL_OLD",
+            }),
+          );
+          result.completed.push(batchId);
+        } catch (err) {
+          if (err instanceof ConditionalCheckFailedException) {
+            // 例外オブジェクト中の Item は自動 unmarshall されないため手動復元する
+            // （直読みすると全件 undefined → not_found に落ちる罠。design §3.5 MEDIUM-7）
+            const item = err.Item ? unmarshall(err.Item) : undefined;
+            if (item === undefined) {
+              result.not_found.push(batchId);
+            } else if (item.status === "ROASTING_DONE") {
+              result.skipped.push(batchId); // 冪等（すでに目的状態）
+            } else {
+              // LABELING / LABELED / 想定外 status → 不正遷移ガード
+              result.invalid.push(batchId);
+            }
+          } else {
+            throw err; // スロットル等は catch が 500 に写す
+          }
+        }
+      }
+      return ok(result);
+    }
+
     case "listUnits": {
       const indexName =
         action.by === "batch"
@@ -217,8 +270,15 @@ async function execute(action: RouteAction): Promise<APIGatewayProxyResult> {
     }
 
     default: {
-      // 到達不能（routeRequest が網羅）。型安全のための保険。
-      throw new HttpError(404, "NotFound", "unhandled action");
+      // routeRequest が全 kind を網羅するため到達不能。
+      // 新しい RouteAction.kind を足して case を書き忘れると、ここで代入が
+      // コンパイルエラー（Type '...' is not assignable to type 'never'）になる（design §3.5 MEDIUM-1）。
+      const _exhaustive: never = action;
+      throw new HttpError(
+        404,
+        "NotFound",
+        `unhandled action: ${String((_exhaustive as RouteAction).kind)}`,
+      );
     }
   }
 }
