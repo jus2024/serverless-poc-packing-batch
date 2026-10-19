@@ -177,6 +177,28 @@ npm run dev
 > `amplify_outputs.json` は sandbox が生成するローカルファイルでコミット対象外です。
 > `.env.local` も同様にコミットしません（シークレットや環境固有値をリポジトリに含めない）。
 
+> **API URL の例の表記について**: 上記コメントのエンドポイント例は `ap-northeast-1`（仕様上の
+> 想定リージョン）ですが、AWS プロファイルの既定リージョンによって実際の URL は変わります
+> （例: `us-west-2`）。`.env.local` には必ず `amplify_outputs.json` の `custom.labelingApiUrl` の
+> 実値を写してください。
+
+#### よくあるハマりどころ: 画面に「付番 API への通信に失敗しました: GET /batches」
+
+この表示は、**フロントが参照している API URL が、現在デプロイされている API Gateway の
+エンドポイントと食い違っている**ときに出ます（初期データの有無とは無関係）。`npx ampx sandbox`
+を再デプロイすると API Gateway のエンドポイントが変わることがあり、`.env.local` が古い URL の
+ままだと発生します。次の手順で解消します。
+
+```bash
+# 1. 現在のデプロイ値を確認
+python3 -c "import json;print(json.load(open('amplify_outputs.json'))['custom']['labelingApiUrl'])"
+
+# 2. .env.local の NEXT_PUBLIC_LABELING_API_URL をその値に更新
+
+# 3. 開発サーバーを再起動（NEXT_PUBLIC_* はビルド時に埋め込まれるため再起動が必須）
+#    npm run dev を一度止めて再実行する
+```
+
 ### 焙煎計画 SEED の投入（plan-seeder）
 
 業務フローの起点である焙煎計画は初期データとして持ちます。デプロイ後、専用 Lambda
@@ -186,12 +208,19 @@ npm run dev
 Streams 流入はゼロ）。
 
 ```bash
-# 物理関数名のサフィックスはデプロイ出力（スタックの関数一覧）で確認する
+# 1. 物理関数名を特定する（サフィックスはスタック名から算出されるため環境依存）
+aws lambda list-functions \
+  --query "Functions[?contains(FunctionName, 'labeling-plan-seeder')].FunctionName" \
+  --output text
+
+# 2. その名前で invoke（ペイロード不要。handler は event を使わない）
 aws lambda invoke \
-  --function-name kiro-roasters-labeling-plan-seeder-<suffix> \
-  --payload '{}' /dev/stdout
+  --function-name kiro-roasters-labeling-plan-seeder-<suffix> /dev/stdout
 # 戻り値 { "inserted": [...], "skipped": [...] } で投入結果を確認できる
+#   再投入時は既存分が skipped に入る（冪等）
 ```
+
+> リージョンが既定プロファイルと異なる場合は各コマンドに `--region <region>`（例 `us-west-2`）を付けます。
 
 投入後、業務モードの焙煎担当画面に `PLANNED` のバッチが並び、焙煎完了の記録ができます。
 シークレットはコード/ペイロードに含めません（テーブル名は環境変数、認証は Lambda 実行ロール）。
@@ -207,7 +236,49 @@ aws lambda invoke \
 | `public/brand/kiro-roasters-icon.png` | 高解像度版（元データ・再書き出し用） |
 | `src/app/icon.png` | ファビコン（256 版をコピー） |
 
-## 検証シナリオ
+## 業務シナリオ（業務モードで現場フローを通す）
+
+業務モードで、焙煎計画から出荷準備までの業務フローを一本で通す手順です。検証の裏側
+（Streams → SQS → 1,000 多重）はそのまま走りつつ、現場の操作として体験できます。
+
+1. `npx ampx sandbox` でデプロイし、`.env.local` の API URL を最新に合わせて `npm run dev`。
+2. `plan-seeder` を手動 invoke して焙煎計画 10 件（`PLANNED`）を投入する
+   （[焙煎計画 SEED の投入](#焙煎計画-seed-の投入plan-seeder)）。
+3. **焙煎担当画面**: `PLANNED` の一覧から、焼き上がったバッチを複数選択して「焙煎完了を記録」。
+   選んだバッチが `ROASTING_DONE`（付番待ち）に遷移する（＝業務プロセスの起点）。
+4. **梱包ワークリスト**: 付番待ちのバッチで「付番開始」。約 1,000 個体が一括投入され付番が走る。
+5. **付番モニタ（ライン監督ビュー）**: 進捗（`labeled_count / unit_count`）と稼働指標
+   （同時実行の張り付き・付番レート・プリンタ能力 500 枚/分との対比・律速判定）を見る。
+6. **出荷準備 / トレース**: 付番完了（`LABELED`）バッチを出荷準備として確認し、シリアル / BATCH /
+   LOT から個体をトレース、LOT 起点のリコール照会（GSI2）を行う。
+
+> **1 バッチだけだと一瞬で終わります。** worker は 1 件あたり実処理 ~80ms のため、1 バッチ程度では
+> SQS → Lambda のスケールが立ち上がる前にキューが枯れ、同時実行が 1,000 に届きません。付番モニタの
+> 稼働指標（1,000 張り付き・プリンタ律速）をしっかり観察したいときは、次の「稼働指標を観測する」を
+> 参照してください。
+
+### 稼働指標・1,000 多重を観測する（`PROCESSING_TIME_MS`）
+
+worker の擬似処理時間を延ばすと、1 バッチでもキューが枯れずに同時実行が積み上がり、付番モニタの
+稼働指標と CloudWatch の立ち上がりカーブを観測できます（リトルの法則: 同時実行 ≒ 到着レート ×
+処理時間）。値は**合成時の環境変数**なので、付けて再デプロイします（コード変更は不要）。
+
+```bash
+# worker の 1 件処理を約 3 秒にして再デプロイ（範囲 0〜60000ms。既定 0）
+PROCESSING_TIME_MS=3000 npx ampx sandbox
+
+# 反映値は GET /config で確認できる（processingTimeMs: 3000 が返る）
+curl -s "$(python3 -c "import json;print(json.load(open('amplify_outputs.json'))['custom']['labelingApiUrl'])")config"
+```
+
+- **供給を厚くする**: 1,000 多重まで張り付かせるには、焙煎計画 10 件を順に焙煎完了 → 複数バッチを
+  相次いで付番開始し、キューを枯らさないようにします。
+- **観測**: 付番モニタで稼働指標が動き、CloudWatch ダッシュボード（`kiro-roasters-labeling-*`）で
+  `ConcurrentExecutions` が `MaximumConcurrency` に向かって立ち上がるカーブが見えます。
+- **後始末**: 観測が終わったら `PROCESSING_TIME_MS` を外して（既定 0 に戻して）再デプロイするか、
+  使わない間は `npx ampx sandbox delete` でスタックごと破棄します（オンデマンド課金のため）。
+
+## 検証シナリオ（検証モードで多重・入口方式を測る）
 
 1. `RELAY_MODE` を選んで `npx ampx sandbox`（まず合成が通ることを確認する）。
 2. 画面 A で RoastBatch を 1 件登録する（`unit_count≈1000`、`status=ROASTING_DONE`）。
