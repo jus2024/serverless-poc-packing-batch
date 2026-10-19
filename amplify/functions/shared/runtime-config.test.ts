@@ -4,6 +4,7 @@ import {
   RuntimeConfigError,
   resolveTableConfig,
   resolveTableNames,
+  resolveRoastBatchTableName,
   resolveVerificationConfig,
   resolveSeedWriteConcurrency,
   BEST_BEFORE_DAYS_DEFAULT,
@@ -63,6 +64,24 @@ describe("resolveTableNames（seeder / worker 用。GSI 名を要求しない）
     expect(() =>
       resolveTableNames({ [ENV_KEYS.UNIT_TABLE_NAME]: "only-unit" }),
     ).toThrow(RuntimeConfigError);
+  });
+});
+
+describe("resolveRoastBatchTableName（plan-seeder 用。unit 名を要求しない）", () => {
+  // plan-seeder には roast-batch 名の環境変数だけが注入される（unit テーブル非接触。§4.1 / §4.2）。
+  // unit 名が無くても roast-batch 名だけで解決できることを固定する（起動時設定エラー回帰）。
+  it("unit 名が無くても roast-batch 名だけで解決する", () => {
+    expect(
+      resolveRoastBatchTableName({
+        [ENV_KEYS.ROAST_BATCH_TABLE_NAME]: "kiro-roasters-roast-batch-ab12cd34",
+      }),
+    ).toEqual({
+      roastBatchTableName: "kiro-roasters-roast-batch-ab12cd34",
+    });
+  });
+
+  it("roast-batch 名の欠落は RuntimeConfigError", () => {
+    expect(() => resolveRoastBatchTableName({})).toThrow(RuntimeConfigError);
   });
 });
 

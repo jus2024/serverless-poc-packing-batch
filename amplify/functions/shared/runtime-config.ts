@@ -135,6 +135,28 @@ export function resolveTableNames(env: EnvSource = process.env): TableNames {
   };
 }
 
+/**
+ * roast-batch テーブル名だけの解決（unit テーブル名を要求しない）。plan-seeder 専用。
+ *
+ * plan-seeder は roast-batch への条件付き PutItem しか行わず、unit テーブルには一切触れない
+ * （design §4.1 / 要件 B2-6: Streams 流入ゼロ・検証コアから独立）。合成側（`labeling-functions.ts`）も
+ * roast-batch 名の環境変数だけを注入している。共通の `resolveTableNames()` は unit 名も
+ * `requireString` するため、plan-seeder がこれを呼ぶと最初の PutItem より前に
+ * `LABELING_UNIT_TABLE_NAME is missing` で実行時に失敗する。
+ * 「roast-batch だけを知る独立関数」という設計境界を保つため、roast 専用で解決する。
+ */
+export interface RoastBatchTableName {
+  roastBatchTableName: string;
+}
+
+export function resolveRoastBatchTableName(
+  env: EnvSource = process.env,
+): RoastBatchTableName {
+  return {
+    roastBatchTableName: requireString(env, ENV_KEYS.ROAST_BATCH_TABLE_NAME),
+  };
+}
+
 /** テーブル / GSI の名前解決（design §4.2）。GSI を使う labeling-api 専用。 */
 export interface TableConfig extends TableNames {
   batchUnitsIndexName: string;

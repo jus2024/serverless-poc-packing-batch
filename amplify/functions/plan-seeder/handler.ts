@@ -17,7 +17,7 @@
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
 import { getDocClient } from "../shared/ddb.js";
-import { resolveTableNames } from "../shared/runtime-config.js";
+import { resolveRoastBatchTableName } from "../shared/runtime-config.js";
 import { buildPlanSeedRecords } from "./plan-data.js";
 
 /** 投入結果（手動 invoke のログで確認する。design §4.4）。 */
@@ -27,8 +27,9 @@ export interface PlanSeedResult {
 }
 
 export const handler = async (): Promise<PlanSeedResult> => {
-  // GSI 不要の軽量版でテーブル名を解決（plan-seeder は roast-batch にしか書かない。§4.2）
-  const tables = resolveTableNames();
+  // roast-batch 専用の解決（plan-seeder は roast-batch にしか書かず、unit テーブル名は
+  // 注入されないため、unit 名も要求する resolveTableNames() を呼ぶと起動時に失敗する。§4.1 / §4.2）
+  const tables = resolveRoastBatchTableName();
   const client = getDocClient();
 
   const records = buildPlanSeedRecords(new Date().toISOString());
