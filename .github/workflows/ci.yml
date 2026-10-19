@@ -28,8 +28,11 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Amplify の深い依存ツリー（@aws-amplify/backend-cli 系）が浮動バージョンを含み、
+      # npm install が書く lockfile を npm ci が厳密検証で弾くことがあるため install を使う。
+      # lockfile はコミット済みで、install はそれを起点に解決する。
       - name: 依存関係のインストール
-        run: npm ci
+        run: npm install
 
       - name: Lint
         run: npm run lint
