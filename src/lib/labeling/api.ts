@@ -31,6 +31,7 @@ import type {
   LabelingErrorBody,
   RoastBatch,
   RoastBatchStatus,
+  RoastingCompleteResponse,
   StartLabelingResponse,
   Unit,
 } from "./types";
@@ -497,6 +498,25 @@ export async function listUnitsByLot(
   const id = requireId(lotId, "ロット ID");
   return requestJson<Unit[]>(
     { method: "GET", path: "/units", query: { lotId: id } },
+    options,
+  );
+}
+
+/**
+ * 焙煎完了を一括記録する（`POST /batches/roasting-complete`。業務の焙煎担当画面。要件 B3）。
+ * 複数バッチを PLANNED → ROASTING_DONE に遷移させ、部分成功を 4 配列で受け取る（design §3.3 / §10）。
+ * 認証・エラー変換・ベース URL 解決は既存基盤をそのまま使う。
+ */
+export function recordRoastingComplete(
+  batchIds: string[],
+  options?: LabelingApiOptions,
+): Promise<RoastingCompleteResponse> {
+  return requestJson<RoastingCompleteResponse>(
+    {
+      method: "POST",
+      path: "/batches/roasting-complete",
+      body: { batch_ids: batchIds },
+    },
     options,
   );
 }

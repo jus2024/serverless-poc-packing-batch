@@ -25,6 +25,12 @@ interface ProgressMonitorPanelProps {
   batchId: string;
   /** 入力欄での batch_id 変更を親へ反映する。 */
   onBatchIdChange: (batchId: string) => void;
+  /**
+   * 自モードが表示中か（design §7.3 HIGH-1）。省略時 `true`（単体利用の後方互換）。
+   * hidden（別モード表示中）のときはポーリングを止めて過剰ポーリングを抑止する。
+   * 表示内容・見た目は不変。
+   */
+  isVisible?: boolean;
 }
 
 /** CloudWatch ダッシュボードへの誘導 URL（任意の環境変数。未設定ならコンソール案内のみ）。 */
@@ -40,8 +46,12 @@ function formatSeconds(sec: number): string {
 export default function ProgressMonitorPanel({
   batchId,
   onBatchIdChange,
+  isVisible = true,
 }: ProgressMonitorPanelProps) {
-  const { batch, error, isPolling } = useBatchPolling(batchId.trim() || null);
+  // hidden（別モード表示中）のときはポーリングを止める（§7.3）。表示時の挙動は不変。
+  const { batch, error, isPolling } = useBatchPolling(
+    (isVisible ? batchId.trim() : "") || null,
+  );
 
   // 直近 2 観測から増分・ETA を算出するための前回サンプル
   const prevSampleRef = useRef<ProgressSample | null>(null);

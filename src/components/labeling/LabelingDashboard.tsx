@@ -27,7 +27,9 @@ const TABS: TabDef[] = [
   { id: "trace", label: "D. トレース照会" },
 ];
 
-export default function LabelingDashboard() {
+export default function LabelingDashboard({
+  isVisible = true,
+}: { isVisible?: boolean } = {}) {
   const [active, setActive] = useState(0);
   // 画面 B → 画面 C へ監視対象 batch_id を受け渡す
   const [monitorBatchId, setMonitorBatchId] = useState("");
@@ -127,6 +129,7 @@ export default function LabelingDashboard() {
         <ProgressMonitorPanel
           batchId={monitorBatchId}
           onBatchIdChange={setMonitorBatchId}
+          isVisible={isVisible}
         />
       </div>
       <div
