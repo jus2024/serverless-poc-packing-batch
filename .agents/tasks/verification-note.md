@@ -135,3 +135,83 @@ handler が共通 `resolveTableNames()` を呼んでいたため `LABELING_UNIT_
 検証コア（labeling-stream/tables/monitoring/alarms、seeder/worker/router）と検証画面（画面 A〜D）、
 labeling-api handler 本体・routes、業務 4 画面、CSS には差分なし。新リゾルバ追加は既存
 `resolveTableNames()` を変更しないため seeder/worker の挙動も不変。
+
+---
+
+# 第 4 反復: review.json（BLOCK-1 + 非ブロッキング）の修正
+
+`review.json` / `semantic-review-b.md`（根拠）/ `semantic-review-a.md` を読んだ。ブロッキングは
+1 件（BLOCK-1 = ダークモードの業務ボタンが WCAG 2.1 AA 未達）。非ブロッキングは UX-1 / DEPLOY-1 /
+NIT-1 / NIT-2。
+
+## BLOCK-1（ダークモードの業務ボタンが AA 未達）
+
+ダークモードの `--color-primary: #4da6e0` に `#fff` 文字を置くとコントラスト 2.68:1 で、通常文字に
+必要な 4.5:1（WCAG 2.1 AA）を満たさない。影響は `.bizButton:hover`（白文字反転）と、RoastingPanel の
+主要操作「焙煎完了を記録」が流用していた既存 `.primaryButton`。`.primaryButton` は検証画面
+（UnitTracePanel / BatchRegisterPanel）と共有されるため、検証画面に影響を与えずに業務画面だけを
+補正する方針を採った。
+
+- `labeling.module.css`: 業務専用の `.bizPrimaryButton` を新設（ライト時は従来 primary と同系）。
+  `@media (prefers-color-scheme: dark)` で `.bizPrimaryButton` 背景を `#1a6aad`（白文字で 5.66:1）、
+  hover を `#176bb0`（5.58:1）、`.bizButton:hover` の背景も `#1a6aad`（5.66:1）に補正。
+- `RoastingPanel.tsx`: 「焙煎完了を記録」ボタンを `.primaryButton` → `.bizPrimaryButton` に変更。
+- 検証画面が使う `.primaryButton` は変更しないため、画面 A〜D の見た目は不変。
+- focus-visible は背景ではなく outline で示すため配色補正の影響を受けない。
+
+コントラスト実測（相対輝度計算）: 業務ボタンの通常/hover が ライト 5.04/7.27、ダーク 5.66/5.58。
+すべて AA（≥4.5:1）を満たす。
+
+## UX-1（後工程ワークリストが初回取得のまま残る）
+
+全業務パネルを常時マウントする一方、PackingPanel / QcPanel はマウント時 effect でしか自動取得せず、
+前工程完了後もタブ遷移直後は古い一覧を表示していた。全マウント方針（§7.4）を維持したまま、
+タブ活性化時に再取得する `isActive` prop を追加。
+
+- `PackingPanel.tsx` / `QcPanel.tsx`: `isActive` prop を追加し、`useEffect([isActive, load])` で
+  アクティブ時のみ `load()` を呼ぶ（非アクティブ時は裏側の無駄な再取得をしない）。
+- `BusinessDashboard.tsx`: `isActive={isVisible && active === N}` を各パネルへ伝搬。
+  表示される一覧データ・操作・ARIA 構造は不変（鮮度のみ改善）。
+
+## NIT-1（package-lock.json の churn と npm ci 不整合）
+
+検証の結果、HEAD の `package-lock.json` は `npm ci` が **ERESOLVE で失敗**することを確認した
+（直接依存に固定した `@aws-sdk/util-dynamodb@3.996.9` の peer が `@aws-sdk/client-dynamodb@^3.1111.0`
+を要求し、固定済み client `3.1014.0` と衝突）。これは Amplify Hosting の `npm ci` を壊すため修正した。
+
+- `package.json` / `package-lock.json`: `@aws-sdk/util-dynamodb` を `3.996.9` → `3.996.2` に変更
+  （peer は `^3.1003.0` で、固定 client `3.1014.0` が満たす）。`lib-dynamodb@3.1014.0` が要求する
+  `^3.996.2` とも一致するため単一版にデデュープされる。`overrides` に `@aws-sdk/util-dynamodb: 3.996.2`
+  を追加し、transitive（lib-dynamodb 経由）も 3.996.2 に固定。
+- lockfile は 3 参照（root spec / resolved+integrity / peer）＋ overrides のみの最小手編集に留め、
+  無関係な floating 依存の再解決（copilotkit/ai/langchain 等の版上げ）は行っていない。
+- 隔離ディレクトリで `npm ci` を実行し、util-dynamodb の ERESOLVE が解消されたことを確認。
+  なお base/HEAD に元々存在する別の lockfile 同期ギャップ（zod・@types/express 等の floating 版ずれ、
+  copilotkit の caret 解決）は本 finding の範囲外かつ修正には依存ツリー全体の再解決が必要になるため、
+  本反復では触れていない。
+
+## DEPLOY-1 / NIT-2（本反復では対応しない）
+
+- **DEPLOY-1**: Amplify Hosting 上の plan-seeder→焙煎完了→付番→梱包→QC 通し結合は SigV4・実 AWS が
+  必要でローカル/CI 不可（design §11.4）。リリース前スモークゲートとして残す（非ブロッキング）。
+- **NIT-2**: warn/unknownBadge の生 hex はダーク分岐込みで AA を満たしており、action は「任意」。
+  共有 globals.css への色変数追加は差分を広げるため、スコープ維持を優先して据え置いた。
+
+## 実行コマンドと結果（worktree ルートで実行・第 4 反復）
+
+| コマンド | 結果 |
+|---|---|
+| `npm run lint`（eslint .） | **pass**（エラーゼロ） |
+| `npx tsc --noEmit`（フロント） | **pass**（エラーゼロ） |
+| `npx vitest --run`（CDK 合成 + ユニット） | **pass**（18 files / 199 tests） |
+| `npm ci`（隔離ディレクトリ・util-dynamodb 検証） | util-dynamodb の ERESOLVE 解消を確認 |
+
+コントラストは相対輝度計算で業務ボタン全状態が AA（≥4.5:1）を満たすことを確認（上記実測値）。
+
+## 検証コア不変の確認（第 4 反復）
+
+変更は `labeling.module.css`（業務 primary クラス追加 + dark 補正）/ `RoastingPanel.tsx`（クラス差替）/
+`PackingPanel.tsx`・`QcPanel.tsx`・`BusinessDashboard.tsx`（`isActive` 伝搬）/ `package.json`・
+`package-lock.json`（util-dynamodb 版整合）のみ。検証コア（labeling-stream/tables/monitoring/alarms、
+seeder/worker/router）、labeling-api handler/routes、plan-seeder、検証画面（画面 A〜D・`.primaryButton`）
+には挙動差分なし。業務パネルの再取得追加は表示データ・操作・ARIA を変えず鮮度のみ改善する。
