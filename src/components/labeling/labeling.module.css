@@ -1,0 +1,415 @@
+/*
+ * 付番検証ダッシュボードのスタイル（CSS Modules。design §11.1）。
+ *
+ * styling 手段は CSS Modules + @aws-amplify/ui-react（ワークスペース steering がグローバル
+ * Tailwind steering より優先。新規にライブラリを足さない）。アクセシビリティ（focus-visible・
+ * 最小タップ領域 44px・レスポンシブ・コントラスト）はグローバル規約と同水準で満たす。
+ * 既存テンプレートの CSS 変数（globals.css の --color-* / --radius / --max-width）を踏襲する。
+ */
+
+.main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.header {
+  margin-bottom: 1.5rem;
+}
+
+.title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+}
+
+/* ─── タブ ─────────────────────────────────────────────── */
+
+.tabList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 1.5rem;
+}
+
+.tab {
+  min-height: 44px; /* 最小タップ領域 */
+  padding: 0.6rem 1rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--color-text);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
+
+.tabActive {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.panel {
+  display: block;
+}
+
+/*
+ * `.panel` のクラスセレクタ（詳細度 0,1,0）が UA の `[hidden]{display:none}`（詳細度 0,0,0）を
+ * 上書きしてしまい、hidden 属性を付けても全パネルが表示されてしまう（タブ切替が効かない原因）。
+ * 同じ詳細度で display:none を明示して hidden を効かせる。
+ */
+.panel[hidden] {
+  display: none;
+}
+
+/* ─── パネル共通 ───────────────────────────────────────── */
+
+.panelTitle {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.panelDescription {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.6;
+}
+
+.note {
+  background-color: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.error {
+  background-color: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.success {
+  background-color: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #166534;
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.empty {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .note {
+    background-color: #1e2a3a;
+    border-color: #1e40af;
+    color: #93c5fd;
+  }
+  .error {
+    background-color: #2d1b1b;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+  }
+  .success {
+    background-color: #14271b;
+    border-color: #166534;
+    color: #86efac;
+  }
+}
+
+/* ─── フォーム ─────────────────────────────────────────── */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 480px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.input {
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-family: inherit;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+.inputInvalid {
+  border-color: #ef4444;
+}
+
+.fieldError {
+  color: #b91c1c;
+  font-size: 0.8rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .fieldError {
+    color: #fca5a5;
+  }
+}
+
+.hint {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+}
+
+/* ─── ボタン ───────────────────────────────────────────── */
+
+.primaryButton {
+  min-height: 44px;
+  align-self: flex-start;
+  padding: 0.6rem 1.4rem;
+  background-color: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background-color: var(--color-primary-hover);
+}
+
+.primaryButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.primaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  min-height: 40px;
+  padding: 0.4rem 0.9rem;
+  background: none;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius);
+  color: var(--color-primary);
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background-color: var(--color-primary);
+  color: #fff;
+}
+
+.secondaryButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin-bottom: 1.25rem;
+}
+
+.inlineField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 180px;
+}
+
+/* ─── 一覧 / テーブル ──────────────────────────────────── */
+
+.tableWrapper {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.table th {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background-color: var(--color-surface);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.statusBadge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+}
+
+/* ─── 進捗バー（画面 C）────────────────────────────────── */
+
+.progressSection {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.progressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+  gap: 1rem;
+}
+
+.progressCount {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.progressBarTrack {
+  height: 14px;
+  border-radius: 999px;
+  background-color: var(--color-border);
+  overflow: hidden;
+}
+
+.progressBarFill {
+  height: 100%;
+  background-color: var(--color-primary);
+  transition: width 0.3s ease;
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.metricCard {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+}
+
+.metricLabel {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+.metricValue {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+/* ─── セクション間の余白 ───────────────────────────────── */
+
+.actions {
+  margin-top: 0.5rem;
+}
+
+.footerLink {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+/* スクリーンリーダー専用（視覚的に隠す） */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+@media (max-width: 600px) {
+  .progressHeader {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .inlineField {
+    min-width: 100%;
+  }
+}
