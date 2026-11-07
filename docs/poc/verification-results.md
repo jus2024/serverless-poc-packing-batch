@@ -31,8 +31,15 @@ Kiro Roasters の梱包バッチ処理（DynamoDB Streams → SQS → 付番ワ�
    学習済みのため、「初動スロットル」を見るにはテーブルのリセットが要る（未実施）。
 7. **投入方法のトレードオフ**: 一気に投入（STAGGER=0）は全体を速く終わらせるが、SQS 滞留が膨らみ 1 バッチの
    業務応答は遅くなる（1 バッチ中央値 9 秒 → 63 秒）。分散投入は 1 バッチの体感を速くする。
-8. **運用の差**: Pipes はマネージドで速い・設定最小だが入口が CloudWatch で観測しにくい（`AWS/Pipes` 未発行）・
-   Lambda 枠を使わない。中継 Lambda は IteratorAge/同時実行を観測でき P で調整できるが S×P を意識した設計と Lambda 枠が要る。
+8. **運用の差**: Pipes はマネージドで速い・設定最小だが Lambda 枠を使わない。中継 Lambda は
+   IteratorAge/同時実行を観測でき P で調整できるが S×P を意識した設計と Lambda 枠が要る。
+
+> **方式比較（T3）に残る未確認・交絡（記事化前に要修正。§4.11 参照）**: 本検証は Pipes 側の
+> 並列度を一度も観測しておらず、Pipes の `ParallelizationFactor` の実値も `describe-pipe` で
+> 確認していない。そのため「Pipes ≈ 中継 Lambda P=10」は**結果が並んだだけで原因を切り分けられていない**
+> （P なのか batchSize（Pipes 10 / 中継 Lambda 100）なのか Pipes 内部機構なのか不明）。
+> なお「Pipes のメトリクスは観測不可」とした当初判断は**誤り**で、`AWS/Pipes` の `Concurrency`
+> （dimension=`AwsAccountId`）で Pipes の同時実行は取得できる（§4.11）。
 
 > 本検証では書き込みが一度もボトルネックにならなかった（WriteThrottle 0）ため、上記の結論は
 > DynamoDB テーブルの書き込み学習状態に依存しない。
@@ -187,7 +194,8 @@ worker Duration（ms、`get-metric-statistics`、1 分粒度）:
 - **ピーク 502 多重**（Pipes 版は同条件で 1,000）。Errors 0、worker Throttle 0、unit Throttle 0。
 - **送信 24,000 / 削除 24,000（取りこぼしなし）。** 入口が違っても個体は欠落しない。
 - worker Duration avg ~3,084ms / p99 ~3,569ms（Pipes 版と同じ＝下流は同条件）。
-- **中継 Lambda IteratorAge 最大 2,541ms**（Pipes 版は `AWS/Pipes` 未発行で観測不可）。
+- **中継 Lambda IteratorAge 最大 2,541ms**（Pipes 版の入口遅れは本検証では未取得。当初「`AWS/Pipes`
+  未発行で観測不可」としたが誤り＝取得方法の問題。§4.11 参照）。
 
 **解釈（T3 の答え）**
 
@@ -277,28 +285,34 @@ worker のピーク多重がどう変わるかを見た（1 変数のみ変更�
 
 **同じ 20 バッチ（24,000 個体）での 3 者比較**
 
-| 方式 | worker ピーク | 1000 到達まで | router 同時実行 | SQS最古滞留 | IteratorAge |
-|------|--------------|--------------|----------------|------------|-------------|
-| Pipes | 1,000 | +60〜120 秒 | 観測不可 | 3 秒 | 観測不可 |
-| 中継 Lambda **P=1** | **502**（未到達） | 未到達 | 5〜7（S×P=4） | 93 秒 | 2,541ms |
-| 中継 Lambda **P=10** | **1,000** | **+60 秒** | **40（S×P=40）** | **4 秒** | 1,575ms |
+| 方式 | worker ピーク | 1000 到達まで | 入口並列度 | SQS最古滞留 | 入口の遅れ |
+|------|--------------|--------------|-----------|------------|-----------|
+| Pipes | 1,000 | +60〜120 秒 | **未取得**（§4.11） | 3 秒 | **未取得**（§4.11） |
+| 中継 Lambda **P=1** | **502**（未到達） | 未到達 | router 5〜7（S×P=4） | 93 秒 | IteratorAge 2,541ms |
+| 中継 Lambda **P=10** | **1,000** | **+60 秒** | router **40（S×P=40）** | **4 秒** | IteratorAge 1,575ms |
 
 いずれも取りこぼし 0（送信=削除 24,000）、Errors/Throttle 0、Duration avg ~3,100ms。
 
-**発見（T3 の最終的な答え）**
+**発見と、残る交絡（§4.11 で要追試）**
 
-- **router 同時実行が S×P=40 ちょうどに跳ねた**（P=1 のとき 4〜7 → P=10 のとき 40）。
-  ESM の `ParallelizationFactor` が供給並列度を線形に決めている直接証拠。これが「入口の供給レートの天井」。
-- **P を 1→10 にするだけで、同じ 20 バッチで 502 → 1,000。** 到達 +60 秒・最古滞留 4 秒と、**Pipes とほぼ同等**。
-- つまり **中継 Lambda 版の「遅さ」は方式の限界ではなく、`ParallelizationFactor` という設定で解消できる**。
-  デフォルト（P=1）だと S×P=4 で Pipes に大きく劣るが、P=10（S×P=40）で Pipes に並ぶ。
+- **中継 Lambda 側**: router 同時実行が S×P=40 ちょうどに跳ねた（P=1 のとき 4〜7 → P=10 のとき 40）。
+  ESM の `ParallelizationFactor` が供給並列度を線形に決めている直接証拠。中継 Lambda 版の「遅さ」は
+  方式の限界ではなく、P=1（S×P=4）という既定設定が原因で、P=10（S×P=40）にすれば worker は
+  同じ 20 バッチで 502 → 1,000 に伸びる——ここまでは中継 Lambda 単体で確定している。
+- **ただし「Pipes に並ぶ」の因果は未確定（交絡）**: Pipes 側の並列度（`AWS/Pipes` の `Concurrency`）も
+  Pipes の `ParallelizationFactor` 実値（`describe-pipe`）も**取っていない**。さらに batchSize が
+  Pipes=10 / 中継 Lambda=100 と**揃っていない**。したがって「P=10 の中継 Lambda が Pipes に並んだ」のは
+  結果が並んだだけで、何が効いたか（P か batchSize か Pipes 内部機構か）は切り分けられていない。
+  この交絡の解消は §4.11 の追試に回す。
 
 **方式選択の結論（T3）**: 「Pipes vs 中継 Lambda」の単純な優劣ではない。
 - **取りこぼし**: どちらも 0（at-least-once + 冪等が効く）。
 - **速さ**: デフォルト設定では Pipes が速い。中継 Lambda も `ParallelizationFactor` を上げれば並ぶ。
-- **トレードオフ**: Pipes はマネージドで速い・設定最小だが入口が CloudWatch で観測しにくい（`AWS/Pipes` 未発行）。
-  中継 Lambda は自前実装で IteratorAge / 同時実行を観測でき、P で供給レートを調整できる自由がある代わりに
-  S×P を意識した設計が要る。
+- **トレードオフ**: Pipes はマネージドで速い・設定最小・Lambda 枠を使わない。中継 Lambda は自前実装で
+  IteratorAge / 同時実行を観測でき、P で供給レートを調整できる自由がある代わりに S×P を意識した設計が要る。
+  （Pipes 側も `AWS/Pipes` の `Concurrency` で同時実行は観測できる。#1 の「観測不可」は誤り。§4.11）
+- **ただし「並ぶ」の因果は未確定**: Pipes の実 P・実効並列度を取っておらず、batchSize も揃っていないため、
+  P=10 の中継 Lambda が Pipes に並んだ理由は切り分けられていない（§4.11 の追試で解消）。
 
 ### 4.8 試行 8 — 最速投入（seeder 並列化）と、オンデマンドの書き込み（T2・学習）
 
@@ -426,6 +440,47 @@ D=3000）で Pipes 版を流し、最速投入どうしで正面比較した。
 
 ---
 
+### 4.11 方式比較（T3）に残る未確認・交絡（記事化前に要追試）
+
+#1 の方式比較は「入口が違うと worker の到達多重が変わる」までは確定しているが、**「Pipes ≈ 中継 Lambda
+P=10」の因果は切り分けられていない**。記事化にあたり、以下の未確認・交絡を限界として明記する。
+
+**判明した誤り（事実確認で確定・追加検証不要）**
+- #1 で「Pipes のメトリクスは `AWS/Pipes` 未発行で観測不可」とした判断は**誤り**。EventBridge Pipes の
+  公式メトリクス（`AWS/Pipes` 名前空間）には **`Concurrency`（a pipe の同時実行数）が存在する**。
+  取れなかった原因は名前空間ではなく **dimension 指定違いの可能性が高い**: `Concurrency` の dimension は
+  **`AwsAccountId` のみ**（`PipeName` ではない）。他メトリクス（`Invocations` 等）と同じ `PipeName` で
+  引くとヒットしない。出典: AWS 公式「Logging and monitoring EventBridge Pipes」のメトリクス表。
+  - 正しい取り方の例:
+    ```bash
+    aws cloudwatch get-metric-data --region us-west-2 \
+      --metric-data-queries '[{"Id":"pc","MetricStat":{"Metric":{"Namespace":"AWS/Pipes","MetricName":"Concurrency","Dimensions":[{"Name":"AwsAccountId","Value":"<ACCOUNT_ID>"}]},"Period":60,"Stat":"Maximum"}}]' \
+      --start-time <...> --end-time <...>
+    ```
+    ※ dimension が AwsAccountId なので、同一アカウントに複数 Pipe があると合算になる点に注意。
+
+**未確認（次に sandbox を立てたとき確定できる）**
+- Pipes の `ParallelizationFactor` の実値を `describe-pipe`（`aws pipes describe-pipe --name <pipe>`）で
+  確認していない。`labeling-stream.ts` の `sourceParameters` に `parallelizationFactor` の指定はなく、
+  公式既定は 1 なので **P=1 のはず**だが、デプロイ済みの実値は未確認。
+- Pipes の実効並列度（`AWS/Pipes` の `Concurrency`）を一度も観測していない。
+
+**交絡（追加検証が要る）**
+- Pipes が本当に P=1 なら、同じ P=1 の中継 Lambda（502・1 バッチ 93 秒）とは大きく違う。差の原因は
+  P ではなく **batchSize（Pipes=10 / 中継 Lambda=100）** や Pipes の内部機構かもしれず、現データでは
+  切り分けられない。「Pipes は内部でもっと並列に動いている」という見立ても仮説段階。
+
+**交絡解消の追試（#2 と同じ sandbox で回せる）**
+1. `describe-pipe` で Pipes の `parallelizationFactor` 実値を確定する。
+2. `AWS/Pipes` の `Concurrency`（dimension=`AwsAccountId`）を observe で取得し、Pipes の実効並列度を見る
+   （observe.sh に Pipes `Concurrency` 系列を追加。dimension が AwsAccountId な点に注意）。
+3. **batchSize を揃えて再測**: 中継 Lambda（router）の `ROUTER_BATCH_SIZE` を Pipes と同じ 10 に下げ、
+   P と batchSize の交絡を断った上で Pipes と中継 Lambda を比較する。これで「並んだ理由が P か
+   batchSize か内部機構か」を切り分ける。
+3 項目とも §6 の未実施リストに追加済み。
+
+---
+
 ## 5. 現時点の結論
 
 - **SQS を挟めば、後続処理の同時実行を Streams のシャード数から切り離して 1,000 多重に到達できる**
@@ -461,7 +516,8 @@ D=3000）で Pipes 版を流し、最速投入どうしで正面比較した。
 | MaxConc < アカウント枠の分離（#2） | `MaximumConcurrency` を 800 等に下げ「worker の天井」と「アカウント枠」を割って Throttle の出方を分離 | 未実施 |
 | 秒粒度の立ち上がりカーブ（#2 おまけ） | CloudWatch Logs Insights で worker の START/END から秒粒度の多重度を再構成（§4.2 は 1 分粒度が限界） | 未実施（Logs Insights クエリのみ・低コスト） |
 | 1250 への接近 | `MaximumConcurrency` を上げて上限に迫る | 未実施（アカウント枠 1000 のため枠引き上げ申請が要る） |
-| 入口の遅れ計測 | Pipes 側は `AWS/Pipes` が本アカウント/構成で**未発行**のため CloudWatch では観測不可（＝ Pipes 経路は入口の遅れがメトリクスで見えない、という知見）。router 側は `AWS/Lambda` IteratorAge で取得可能 | router 側は L_cmp（lambda モード）で取得予定。SQS 最古滞留は取得済み |
+| 方式比較の交絡解消（T3・記事化前） | ①`describe-pipe` で Pipes の `parallelizationFactor` 実値を確定 ②`AWS/Pipes` の `Concurrency`（dimension=`AwsAccountId`）で Pipes 実効並列度を観測 ③`ROUTER_BATCH_SIZE=10` に揃えて P と batchSize の交絡を断ち再測 | 未実施（§4.11）。「Pipes≈P=10」の因果（P か batchSize か内部機構か）を切り分ける |
+| 入口の遅れ計測 | Pipes の `Concurrency` は `AWS/Pipes`・dimension=`AwsAccountId` で取得可能（#1 の「観測不可」は dimension 指定違いによる誤り。§4.11）。router 側は `AWS/Lambda` IteratorAge で取得可能 | Pipes `Concurrency` は §4.11 の追試で取得予定。router 側は取得済み。SQS 最古滞留は両方式で取得済み |
 
 ---
 
@@ -502,7 +558,7 @@ Throttles(worker/unit): ...
 | SQS 最古メッセージ滞留（最大） | 3 秒 | **93 秒**（供給が遅く滞留が古くなった） |
 | SQS 滞留ピーク（queue_visible） | 0〜2（即捌け） | **9,518**（供給が worker 立ち上がりより速く積んだ） |
 | 取りこぼし（送信=削除） | なし（24,000=24,000） | なし（24,000=24,000） |
-| 入口の遅れ（IteratorAge） | 観測不可（`AWS/Pipes` 未発行） | **最大 2,541ms**（Streams 読み出しが S×P で律速） |
+| 入口の遅れ | 本検証では未取得（`AWS/Pipes` の `Concurrency` で観測可。#1 の「観測不可」は誤り。§4.11） | IteratorAge **最大 2,541ms**（Streams 読み出しが S×P で律速） |
 | 実装・運用 | マネージド（フィルタ+Target 設定のみ。batchSize は SQS 上限 10 に注意） | 自前 Lambda（ESM で Streams 読み、SendMessageBatch）。入口を可観測にできる |
 
 **結論（T3）**: 同じ下流・同じ投入でも、**入口が Pipes か中継 Lambda かで worker の到達多重が 1,000 vs 502 と
