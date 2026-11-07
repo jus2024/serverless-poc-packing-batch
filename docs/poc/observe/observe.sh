@@ -70,13 +70,21 @@ ROUTER="$(aws lambda list-functions --region "$REGION" \
 QUEUE_NAME="$(aws sqs list-queues --region "$REGION" --queue-name-prefix "${PREFIX}-labeling" \
   --query "QueueUrls" --output text 2>/dev/null | tr '\t' '\n' | grep -v 'dlq' | grep . | head -1 | sed 's#.*/##' || true)"
 
+# Pipes（RELAY_MODE=pipes/both のときだけ存在）。接頭辞 ${PREFIX}-labeling-pipe の先頭 1 件。
+# list-pipes が権限不足等で失敗しても観測全体は止めない（|| true）。
+PIPE_NAME="$(aws pipes list-pipes --region "$REGION" \
+  --query "Pipes[?starts_with(Name,'${PREFIX}-labeling-pipe')].Name" \
+  --output text 2>/dev/null | pick_first || true)"
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
+
 if [[ "$WORKER" == "None" || -z "$WORKER" ]]; then
-  echo "ERROR: labeling-worker が見つかりません（リージョン $REGION、接頭辞 $PREFIX）。sandbox をデプロイ済みか確認してください。" >&2
+  echo "ERROR: labeling-worker が見つかりません（リージョン ${REGION}、接頭辞 ${PREFIX}）。sandbox をデプロイ済みか確認してください。" >&2
   exit 1
 fi
 echo "worker: $WORKER"
 echo "unit table: $UNIT_TABLE"
 echo "queue: $QUEUE_NAME"
+echo "pipe: ${PIPE_NAME:-（なし。RELAY_MODE=lambda の可能性）}"
 
 # ─── 期間（UTC ISO8601） ──────────────────────────────────────────
 # 時刻トークンを UTC ISO8601 に解決する。受け付ける形:
@@ -158,13 +166,25 @@ trap 'rm -f "$QFILE"' EXIT
 
 # 中継 Lambda（router）の IteratorAge は RELAY_MODE=lambda/both のときだけ値を持つ
 # （Streams ESM が付いている場合）。router が存在すれば m14 として追加する。
-# Pipes 専用のメトリクス（AWS/Pipes）は本アカウント/構成では未発行のため取得しない
-# （= Pipes 経路は入口の遅れを CloudWatch では観測できない。方式比較の論点として記録する）。
+# Pipes のメトリクス（AWS/Pipes）は下の PIPES_Q で取得する（#1 の「未発行で観測不可」は誤りだった。§4.11）。
 ROUTER_Q=""
 if [[ -n "$ROUTER" && "$ROUTER" != "None" ]]; then
   # m14 IteratorAge（入口遅れ）、m15 ConcurrentExecutions（S×P の壁の可視化。
   # 中継 Lambda は Streams を ESM で読むため同時実行が S×P に張り付く）。
   ROUTER_Q=",{\"Id\":\"m14\",\"Label\":\"RouterIteratorAgeMs\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"IteratorAge\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},{\"Id\":\"m15\",\"Label\":\"RouterConcurrent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"ConcurrentExecutions\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
+fi
+
+# Pipes の Concurrency（m16）。AWS 公式の dimension は AwsAccountId のみ（PipeName ではない）。
+# ★ そのため値は「アカウント内の全 Pipe の合算」になる。このアカウントでは同時に Pipe は
+#   1 本の想定なので、そのままこの Pipe の実効並列度として読む（他の Pipe があれば読み違える）。
+# Pipe が見つかったときだけ補助として Invocations（m17）/ ExecutionThrottled（m18）も取る
+# （どちらも AwsAccountId + PipeName の dimension）。主役は Concurrency。
+PIPES_Q=""
+if [[ -n "$ACCOUNT_ID" && "$ACCOUNT_ID" != "None" ]]; then
+  PIPES_Q=",{\"Id\":\"m16\",\"Label\":\"PipesConcurrent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Pipes\",\"MetricName\":\"Concurrency\",\"Dimensions\":[{\"Name\":\"AwsAccountId\",\"Value\":\"$ACCOUNT_ID\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
+  if [[ -n "$PIPE_NAME" ]]; then
+    PIPES_Q="$PIPES_Q,{\"Id\":\"m17\",\"Label\":\"PipesInvocations\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Pipes\",\"MetricName\":\"Invocations\",\"Dimensions\":[{\"Name\":\"AwsAccountId\",\"Value\":\"$ACCOUNT_ID\"},{\"Name\":\"PipeName\",\"Value\":\"$PIPE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},{\"Id\":\"m18\",\"Label\":\"PipesThrottled\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Pipes\",\"MetricName\":\"ExecutionThrottled\",\"Dimensions\":[{\"Name\":\"AwsAccountId\",\"Value\":\"$ACCOUNT_ID\"},{\"Name\":\"PipeName\",\"Value\":\"$PIPE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}}"
+  fi
 fi
 
 printf '%s' "[\
@@ -180,7 +200,7 @@ printf '%s' "[\
 {\"Id\":\"m10\",\"Label\":\"QueueOldestAgeSec\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"ApproximateAgeOfOldestMessage\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},\
 {\"Id\":\"m11\",\"Label\":\"QueueMessagesSent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"NumberOfMessagesSent\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
 {\"Id\":\"m12\",\"Label\":\"QueueMessagesDeleted\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/SQS\",\"MetricName\":\"NumberOfMessagesDeleted\",\"Dimensions\":[{\"Name\":\"QueueName\",\"Value\":\"$QUEUE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},\
-{\"Id\":\"m13\",\"Label\":\"RoastBatchWCU\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/DynamoDB\",\"MetricName\":\"ConsumedWriteCapacityUnits\",\"Dimensions\":[{\"Name\":\"TableName\",\"Value\":\"$ROAST_TABLE\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}}$ROUTER_Q\
+{\"Id\":\"m13\",\"Label\":\"RoastBatchWCU\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/DynamoDB\",\"MetricName\":\"ConsumedWriteCapacityUnits\",\"Dimensions\":[{\"Name\":\"TableName\",\"Value\":\"$ROAST_TABLE\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}}$ROUTER_Q$PIPES_Q\
 ]" > "$QFILE"
 
 echo "GetMetricData 取得中 ($START 〜 $END)..."
@@ -191,7 +211,7 @@ RAW="$(aws cloudwatch get-metric-data --region "$REGION" \
   --output json)"
 
 # ─── CSV 化 + サマリ（timestamp を揃えて結合） ────────────────────
-echo "$RAW" | python3 "$(dirname "$0")/to_csv.py" "$CSV"
+echo "$RAW" | PIPE_NAME="$PIPE_NAME" REGION="$REGION" python3 "$(dirname "$0")/to_csv.py" "$CSV"
 
 echo ""
 echo "CSV: $CSV"

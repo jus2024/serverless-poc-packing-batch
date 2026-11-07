@@ -477,7 +477,7 @@ P=10」の因果は切り分けられていない**。記事化にあたり、�
 3. **batchSize を揃えて再測**: 中継 Lambda（router）の `ROUTER_BATCH_SIZE` を Pipes と同じ 10 に下げ、
    P と batchSize の交絡を断った上で Pipes と中継 Lambda を比較する。これで「並んだ理由が P か
    batchSize か内部機構か」を切り分ける。
-3 項目とも §6 の未実施リストに追加済み。
+3 項目とも §6 の未実施リストに追加済み。実行手順は [t3-confounding-experiment.md](./t3-confounding-experiment.md) を参照。
 
 ---
 
@@ -516,7 +516,7 @@ P=10」の因果は切り分けられていない**。記事化にあたり、�
 | MaxConc < アカウント枠の分離（#2） | `MaximumConcurrency` を 800 等に下げ「worker の天井」と「アカウント枠」を割って Throttle の出方を分離 | 未実施 |
 | 秒粒度の立ち上がりカーブ（#2 おまけ） | CloudWatch Logs Insights で worker の START/END から秒粒度の多重度を再構成（§4.2 は 1 分粒度が限界） | 未実施（Logs Insights クエリのみ・低コスト） |
 | 1250 への接近 | `MaximumConcurrency` を上げて上限に迫る | 未実施（アカウント枠 1000 のため枠引き上げ申請が要る） |
-| 方式比較の交絡解消（T3・記事化前） | ①`describe-pipe` で Pipes の `parallelizationFactor` 実値を確定 ②`AWS/Pipes` の `Concurrency`（dimension=`AwsAccountId`）で Pipes 実効並列度を観測 ③`ROUTER_BATCH_SIZE=10` に揃えて P と batchSize の交絡を断ち再測 | 未実施（§4.11）。「Pipes≈P=10」の因果（P か batchSize か内部機構か）を切り分ける |
+| 方式比較の交絡解消（T3・記事化前） | ①`describe-pipe` で Pipes の `parallelizationFactor` 実値を確定 ②`AWS/Pipes` の `Concurrency`（dimension=`AwsAccountId`）で Pipes 実効並列度を観測 ③`ROUTER_BATCH_SIZE=10` に揃えて P と batchSize の交絡を断ち再測 | 未実施（§4.11。手順書: [t3-confounding-experiment.md](./t3-confounding-experiment.md)）。「Pipes≈P=10」の因果（P か batchSize か内部機構か）を切り分ける |
 | 入口の遅れ計測 | Pipes の `Concurrency` は `AWS/Pipes`・dimension=`AwsAccountId` で取得可能（#1 の「観測不可」は dimension 指定違いによる誤り。§4.11）。router 側は `AWS/Lambda` IteratorAge で取得可能 | Pipes `Concurrency` は §4.11 の追試で取得予定。router 側は取得済み。SQS 最古滞留は両方式で取得済み |
 
 ---

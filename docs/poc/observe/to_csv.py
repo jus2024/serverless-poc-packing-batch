@@ -8,6 +8,7 @@ worker ConcurrentExecutions のピークと「N 到達までの経過秒」を�
 使い方: observe.sh が `... | python3 to_csv.py <出力CSVパス>` で呼ぶ。
 標準ライブラリのみ（追加依存なし）。
 """
+import os
 import sys
 import json
 from datetime import datetime
@@ -29,6 +30,11 @@ COLUMNS = [
     ("RoastBatchWCU", "roast_batch_wcu_sum"),
     ("RouterIteratorAgeMs", "router_iterator_age_ms_max"),
     ("RouterConcurrent", "router_concurrent_max"),
+    # AWS/Pipes。Concurrency は dimension が AwsAccountId のためアカウント内の全 Pipe の合算
+    # （このアカウントでは同時に Pipe は 1 本の想定）。Invocations/ExecutionThrottled は PipeName 付き。
+    ("PipesConcurrent", "pipes_concurrent_max"),
+    ("PipesInvocations", "pipes_invocations_sum"),
+    ("PipesThrottled", "pipes_throttled_sum"),
 ]
 # 1000 多重の立ち上がりを測る到達しきい値
 RAMP_TARGETS = [100, 250, 500, 750, 900, 1000]
@@ -122,6 +128,20 @@ def main() -> None:
     router_conc = [v for v in series["RouterConcurrent"].values() if v is not None]
     if router_conc:
         print(f"中継 Lambda 同時実行 (最大): {max(router_conc):g}  ← S×P の壁（供給レートの天井）")
+    pipes_conc = [v for v in series["PipesConcurrent"].values() if v is not None]
+    if pipes_conc:
+        print(f"Pipes 同時実行 (最大): {max(pipes_conc):g}  ← アカウント内全 Pipe の合算（dimension=AwsAccountId）")
+    elif os.environ.get("PIPE_NAME"):
+        # Pipe は居るのに Concurrency が 1 件も返らなかった → 原因切り分けのヒント
+        region = os.environ.get("REGION", "<region>")
+        print("注意: Pipe は検出されたが AWS/Pipes Concurrency が空でした。"
+              "実際の MetricName/Dimensions を確認してください:", file=sys.stderr)
+        print(f"  aws cloudwatch list-metrics --namespace AWS/Pipes --region {region}", file=sys.stderr)
+    pipes_inv = [v for v in series["PipesInvocations"].values() if v is not None]
+    pipes_thr = [v for v in series["PipesThrottled"].values() if v is not None]
+    if pipes_inv:
+        print(f"Pipes Invocations 合計: {sum(pipes_inv):g}"
+              + (f" / ExecutionThrottled 合計: {sum(pipes_thr):g}" if pipes_thr else ""))
     print("────────────────────────────────────────────")
 
 
