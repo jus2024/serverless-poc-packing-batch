@@ -94,7 +94,7 @@ print(len(sh), len(op), d.get("LastEvaluatedShardId", ""))
       [[ -z "${NEXT:-}" ]] && break
       START_ID="$NEXT"
     done
-    echo "オープンシャード数 S: $SHARDS_OPEN （全シャード $SHARDS_ALL）  ← 試行ごとに記録する"
+    echo "オープンシャード数 S: ${SHARDS_OPEN} （全シャード ${SHARDS_ALL}）  ← 試行ごとに記録する"
   fi
 fi
 

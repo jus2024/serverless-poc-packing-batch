@@ -4,7 +4,7 @@
 #
 # load.sh が作ったバッチを T0 で絞り、対象数・LABELED 数・全体所要・1 バッチ所要（min/中央値/max）を出す。
 # タイムスタンプが壊れているバッチ（macOS の date で `.%3N` が展開されず `.3N` になった旧 load.sh 由来）は
-# parse に失敗するため除外し、件数を報告する。
+# `.3N` を除去して秒精度で読む。それでも parse できない値は除外して件数を報告する。
 #
 # 使い方:
 #   SINCE=2026-10-19T03:00:00Z bash docs/poc/observe/batch-times.sh
@@ -24,7 +24,7 @@ pick_first() { tr '\t' '\n' | grep -v '^None$' | grep . | head -1 || true; }
 ROAST_TABLE="$(aws dynamodb list-tables --region "$REGION" \
   --query "TableNames[?starts_with(@,'${PREFIX}-roast-batch')]" --output text | pick_first)"
 if [[ -z "$ROAST_TABLE" ]]; then
-  echo "ERROR: roast-batch テーブルが見つかりません（リージョン $REGION / 接頭辞 ${PREFIX}）。sandbox デプロイを確認してください。" >&2
+  echo "ERROR: roast-batch テーブルが見つかりません（リージョン ${REGION} / 接頭辞 ${PREFIX}）。sandbox デプロイを確認してください。" >&2
   exit 1
 fi
 echo "リージョン: $REGION / roast-batch table: $ROAST_TABLE / SINCE: ${SINCE:-（指定なし）}"
@@ -34,11 +34,14 @@ aws dynamodb scan --region "$REGION" --table-name "$ROAST_TABLE" \
   --projection-expression "batch_id, #s, labeling_started_at, labeling_finished_at" \
   --expression-attribute-names '{"#s":"status"}' \
   --output json | SINCE="$SINCE" python3 -c '
-import os, sys, json, statistics
+import os, re, sys, json, statistics
 from datetime import datetime, timezone
 
 def parse(s):
-    # 壊れた値（例 ...:00.3NZ）は ValueError になり呼び出し側で除外する
+    # 旧 load.sh の壊れた値（例 ...:00.3NZ）は `.3N` を除去して秒精度で読む。
+    # 通常の小数秒（.123Z 等）はそのまま fromisoformat に渡す。それ以外の不正値は ValueError で除外する
+    s = re.sub(r"\.\d*N", "", s)
+    s = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), s)
     return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 since_raw = os.environ.get("SINCE", "")
