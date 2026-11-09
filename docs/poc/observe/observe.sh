@@ -75,7 +75,6 @@ QUEUE_NAME="$(aws sqs list-queues --region "$REGION" --queue-name-prefix "${PREF
 PIPE_NAME="$(aws pipes list-pipes --region "$REGION" \
   --query "Pipes[?starts_with(Name,'${PREFIX}-labeling-pipe')].Name" \
   --output text 2>/dev/null | pick_first || true)"
-ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
 
 if [[ "$WORKER" == "None" || -z "$WORKER" ]]; then
   echo "ERROR: labeling-worker が見つかりません（リージョン ${REGION}、接頭辞 ${PREFIX}）。sandbox をデプロイ済みか確認してください。" >&2
@@ -166,7 +165,7 @@ trap 'rm -f "$QFILE"' EXIT
 
 # 中継 Lambda（router）の IteratorAge は RELAY_MODE=lambda/both のときだけ値を持つ
 # （Streams ESM が付いている場合）。router が存在すれば m14 として追加する。
-# Pipes のメトリクス（AWS/Pipes）は下の PIPES_Q で取得する（#1 の「未発行で観測不可」は誤りだった。§4.11）。
+# Pipes のメトリクス（AWS/EventBridge/Pipes）は下の PIPES_Q で取得する（#1 の「未発行で観測不可」は誤り。原因は namespace の取り違えだった。§4.11）。
 ROUTER_Q=""
 if [[ -n "$ROUTER" && "$ROUTER" != "None" ]]; then
   # m14 IteratorAge（入口遅れ）、m15 ConcurrentExecutions（S×P の壁の可視化。
@@ -174,17 +173,17 @@ if [[ -n "$ROUTER" && "$ROUTER" != "None" ]]; then
   ROUTER_Q=",{\"Id\":\"m14\",\"Label\":\"RouterIteratorAgeMs\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"IteratorAge\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}},{\"Id\":\"m15\",\"Label\":\"RouterConcurrent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Lambda\",\"MetricName\":\"ConcurrentExecutions\",\"Dimensions\":[{\"Name\":\"FunctionName\",\"Value\":\"$ROUTER\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
 fi
 
-# Pipes の Concurrency（m16）。AWS 公式の dimension は AwsAccountId のみ（PipeName ではない）。
-# ★ そのため値は「アカウント内の全 Pipe の合算」になる。このアカウントでは同時に Pipe は
-#   1 本の想定なので、そのままこの Pipe の実効並列度として読む（他の Pipe があれば読み違える）。
-# Pipe が見つかったときだけ補助として Invocations（m17）/ ExecutionThrottled（m18）も取る
-# （どちらも AwsAccountId + PipeName の dimension）。主役は Concurrency。
-PIPES_Q=""
-if [[ -n "$ACCOUNT_ID" && "$ACCOUNT_ID" != "None" ]]; then
-  PIPES_Q=",{\"Id\":\"m16\",\"Label\":\"PipesConcurrent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Pipes\",\"MetricName\":\"Concurrency\",\"Dimensions\":[{\"Name\":\"AwsAccountId\",\"Value\":\"$ACCOUNT_ID\"}]},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
-  if [[ -n "$PIPE_NAME" ]]; then
-    PIPES_Q="$PIPES_Q,{\"Id\":\"m17\",\"Label\":\"PipesInvocations\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Pipes\",\"MetricName\":\"Invocations\",\"Dimensions\":[{\"Name\":\"AwsAccountId\",\"Value\":\"$ACCOUNT_ID\"},{\"Name\":\"PipeName\",\"Value\":\"$PIPE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},{\"Id\":\"m18\",\"Label\":\"PipesThrottled\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"AWS/Pipes\",\"MetricName\":\"ExecutionThrottled\",\"Dimensions\":[{\"Name\":\"AwsAccountId\",\"Value\":\"$ACCOUNT_ID\"},{\"Name\":\"PipeName\",\"Value\":\"$PIPE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}}"
-  fi
+# Pipes のメトリクス（namespace は AWS/EventBridge/Pipes。AWS/Pipes ではない）。
+# - Concurrency（m16）は実機では dimension なし（list-metrics で空の dimension セットのみ）。
+#   公式の表にある AwsAccountId dimension は実機と一致しなかった。そのため dimension なしで取る。
+#   値はアカウント内の全 Pipe の合算（このアカウントでは同時に Pipe は 1 本の想定）。
+# - Invocations（m17）/ ExecutionThrottled（m18）は dimension なしと PipeName 付きの両方が存在する。
+#   Pipe が見つかったときだけ PipeName 付きで取る。
+# - EventCount / Duration も PipeName 付きで存在するが、本ツールでは取得しない。
+PIPES_NS="AWS/EventBridge/Pipes"
+PIPES_Q=",{\"Id\":\"m16\",\"Label\":\"PipesConcurrent\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"$PIPES_NS\",\"MetricName\":\"Concurrency\"},\"Period\":$PERIOD,\"Stat\":\"Maximum\"}}"
+if [[ -n "$PIPE_NAME" ]]; then
+  PIPES_Q="$PIPES_Q,{\"Id\":\"m17\",\"Label\":\"PipesInvocations\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"$PIPES_NS\",\"MetricName\":\"Invocations\",\"Dimensions\":[{\"Name\":\"PipeName\",\"Value\":\"$PIPE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}},{\"Id\":\"m18\",\"Label\":\"PipesThrottled\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"$PIPES_NS\",\"MetricName\":\"ExecutionThrottled\",\"Dimensions\":[{\"Name\":\"PipeName\",\"Value\":\"$PIPE_NAME\"}]},\"Period\":$PERIOD,\"Stat\":\"Sum\"}}"
 fi
 
 printf '%s' "[\

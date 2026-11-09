@@ -51,7 +51,7 @@ SEEDER="$(aws lambda list-functions --region "$REGION" \
   --output text | pick_first)"
 
 if [[ -z "$ROAST_TABLE" || -z "$SEEDER" ]]; then
-  echo "ERROR: roast-batch テーブルまたは seeder が見つかりません（リージョン $REGION / 接頭辞 $PREFIX）。sandbox デプロイを確認してください。" >&2
+  echo "ERROR: roast-batch テーブルまたは seeder が見つかりません（リージョン ${REGION} / 接頭辞 ${PREFIX}）。sandbox デプロイを確認してください。" >&2
   exit 1
 fi
 echo "roast-batch table: $ROAST_TABLE"
@@ -59,10 +59,17 @@ echo "seeder: $SEEDER"
 echo ""
 
 # ─── 投入ループ ──────────────────────────────────────────────────
+# ミリ秒付き UTC タイムスタンプ。macOS の date は %3N を展開せず `.3N` になるため python3 で生成する
+# （python3 が無い環境では `.000Z` にフォールバック）。macOS / Linux 両対応。
+now_ms() {
+  python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z")' 2>/dev/null \
+    || date -u +%Y-%m-%dT%H:%M:%S.000Z
+}
+
 NOW_BASE="$(date -u +%Y-%m-%dT%H:%M:%S)"
 for i in $(seq 1 "$BATCHES"); do
   # バッチ ID は衝突しないよう連番 + 秒 + ループ番号で一意化
-  TS="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)"
+  TS="$(now_ms)"
   BATCH_ID="BATCH#${LOT_ID#LOT#}-load-${NOW_BASE}-$(printf '%02d' "$i")"
 
   # 1. roast-batch を LABELING で作成（画面 B の条件付き遷移に相当）

@@ -62,17 +62,19 @@ START_TIME=$T0 PERIOD=10 bash docs/poc/observe/observe.sh
   - `unit_write_throttle_sum` unit 書込スロットル（T2）／ `roast_batch_wcu_sum` 完了カウンタ更新の WCU
   - `router_iterator_age_ms_max` 中継 Lambda の入口遅れ（`RELAY_MODE=lambda/both` のときのみ値が入る）
   - `router_concurrent_max` 中継 Lambda の同時実行（S×P の壁）
-  - `pipes_concurrent_max` Pipes の同時実行（`AWS/Pipes` `Concurrency`）。
-    **dimension が `AwsAccountId` のみのため、アカウント内の全 Pipe の合算**（同時に Pipe は 1 本の想定）。
-    `pipes_invocations_sum` / `pipes_throttled_sum` は Pipe 検出時のみの補助（AwsAccountId+PipeName）
+  - `pipes_concurrent_max` Pipes の同時実行（namespace `AWS/EventBridge/Pipes`、`Concurrency`）。
+    実機では **dimension なし**（list-metrics で空の dimension セットのみ確認。公式表の `AwsAccountId` は実機と一致しなかった）。
+    そのためアカウント内の全 Pipe の合算になる（同時に Pipe は 1 本の想定）。
+    `pipes_invocations_sum` / `pipes_throttled_sum` は Pipe 検出時のみの補助（`PipeName` 付き。dimension なしの系列も存在する）
 - **サマリ**（標準出力）: ピーク同時実行数、各しきい値（100/250/500/750/900/1000）への**到達経過秒**（T1）、
   Duration avg/p99、Errors、worker/unit Throttle（T2）、SQS 最古滞留、送信=削除の取りこぼし判定、
   中継 Lambda IteratorAge（lambda モード時）。
 
-> 入口（Streams→SQS）: Pipes の同時実行は `pipes_concurrent_max`（`AWS/Pipes` `Concurrency`）で見る
-> （#1 の「未発行で観測不可」は誤り。[§4.11](../verification-results.md)）。Pipe があるのに値が空のときは
-> 標準エラーに出るヒントのとおり `aws cloudwatch list-metrics --namespace AWS/Pipes` で実際の
-> MetricName/Dimensions を確認する。中継 Lambda 経路は `router_iterator_age_ms_max` で観測できる。
+> 入口（Streams→SQS）: Pipes の同時実行は `pipes_concurrent_max`（`AWS/EventBridge/Pipes` `Concurrency`）で見る
+> （#1 の「未発行で観測不可」は誤り。原因は namespace の取り違え `AWS/Pipes` で、dimension の不一致ではない。
+> [§4.11](../verification-results.md)）。Pipe があるのに値が空のときは
+> 標準エラーに出るヒントのとおり `aws cloudwatch list-metrics --namespace AWS/EventBridge/Pipes` で実際の
+> MetricName/Dimensions を確認する。`EventCount` / `Duration` は `PipeName` dimension（本ツールでは未取得）。中継 Lambda 経路は `router_iterator_age_ms_max` で観測できる。
 > ConcurrentExecutions は最小 1 分粒度のため立ち上がりカーブは 1 分刻み。秒粒度は Logs Insights で別途再構成する。
 
 ## 典型的な観測手順（R5）
@@ -132,8 +134,11 @@ bash docs/poc/observe/pipe-info.sh
 ### batch-times.sh（業務時間の集計）
 
 roast-batch の `labeling_started_at → labeling_finished_at` を集計する（対象数・LABELED 数・全体所要・
-1 バッチ所要 min/中央値/max）。`SINCE`（UTC ISO8601、引数でも可）以降に開始したバッチだけが対象。
-壊れたタイムスタンプ（旧 load.sh の `.3N` 問題）は除外して件数を報告する。
+1 バッチ所要 min/中央値/max）。`SINCE`（別名 `START_TIME`。UTC ISO8601、引数でも可）以降に開始したバッチだけが対象。
+旧 load.sh が作った壊れたタイムスタンプ（`.3N` 問題）は `.3N` を除去して秒精度で読む。
+それでも parse できない値は除外して件数を報告する。
+load.sh 側は python3 でミリ秒を生成するよう修正済み（macOS / Linux 両対応。python3 が無ければ `.000Z`）。
+過去の検証で作った古いバッチがテーブルに残るため、**必ず `SINCE` に投入前に控えた T0 を指定する**。
 
 ```bash
 SINCE=$T0 bash docs/poc/observe/batch-times.sh

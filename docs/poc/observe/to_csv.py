@@ -30,8 +30,8 @@ COLUMNS = [
     ("RoastBatchWCU", "roast_batch_wcu_sum"),
     ("RouterIteratorAgeMs", "router_iterator_age_ms_max"),
     ("RouterConcurrent", "router_concurrent_max"),
-    # AWS/Pipes。Concurrency は dimension が AwsAccountId のためアカウント内の全 Pipe の合算
-    # （このアカウントでは同時に Pipe は 1 本の想定）。Invocations/ExecutionThrottled は PipeName 付き。
+    # AWS/EventBridge/Pipes。Concurrency は実機では dimension なし（アカウント内の全 Pipe の合算。
+    # このアカウントでは同時に Pipe は 1 本の想定）。Invocations/ExecutionThrottled は PipeName 付きで取る。
     ("PipesConcurrent", "pipes_concurrent_max"),
     ("PipesInvocations", "pipes_invocations_sum"),
     ("PipesThrottled", "pipes_throttled_sum"),
@@ -130,13 +130,13 @@ def main() -> None:
         print(f"中継 Lambda 同時実行 (最大): {max(router_conc):g}  ← S×P の壁（供給レートの天井）")
     pipes_conc = [v for v in series["PipesConcurrent"].values() if v is not None]
     if pipes_conc:
-        print(f"Pipes 同時実行 (最大): {max(pipes_conc):g}  ← アカウント内全 Pipe の合算（dimension=AwsAccountId）")
+        print(f"Pipes 同時実行 (最大): {max(pipes_conc):g}  ← アカウント内全 Pipe の合算（dimension なし）")
     elif os.environ.get("PIPE_NAME"):
         # Pipe は居るのに Concurrency が 1 件も返らなかった → 原因切り分けのヒント
         region = os.environ.get("REGION", "<region>")
-        print("注意: Pipe は検出されたが AWS/Pipes Concurrency が空でした。"
+        print("注意: Pipe は検出されたが AWS/EventBridge/Pipes Concurrency が空でした。"
               "実際の MetricName/Dimensions を確認してください:", file=sys.stderr)
-        print(f"  aws cloudwatch list-metrics --namespace AWS/Pipes --region {region}", file=sys.stderr)
+        print(f"  aws cloudwatch list-metrics --namespace AWS/EventBridge/Pipes --region {region}", file=sys.stderr)
     pipes_inv = [v for v in series["PipesInvocations"].values() if v is not None]
     pipes_thr = [v for v in series["PipesThrottled"].values() if v is not None]
     if pipes_inv:
