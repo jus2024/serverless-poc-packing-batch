@@ -9,7 +9,7 @@
 # 使い方:
 #   SINCE=2026-10-19T03:00:00Z bash docs/poc/observe/batch-times.sh
 #   bash docs/poc/observe/batch-times.sh 2026-10-19T03:00:00Z     # 引数でも可
-#   （SINCE 省略時は全バッチ対象）
+#   （SINCE 省略時は全バッチ対象。START_TIME も同義の別名として使える）
 #
 # 前提: AWS CLI v2 / python3（標準ライブラリのみ）/ 読み取り専用（scan）。
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 
 REGION="${REGION:-${AWS_REGION:-us-west-2}}"
 PREFIX="${PREFIX:-kiro-roasters}"
-SINCE="${1:-${SINCE:-}}"
+SINCE="${1:-${SINCE:-${START_TIME:-}}}"
 
 pick_first() { tr '\t' '\n' | grep -v '^None$' | grep . | head -1 || true; }
 

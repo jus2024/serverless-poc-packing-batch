@@ -134,7 +134,7 @@ bash docs/poc/observe/pipe-info.sh
 ### batch-times.sh（業務時間の集計）
 
 roast-batch の `labeling_started_at → labeling_finished_at` を集計する（対象数・LABELED 数・全体所要・
-1 バッチ所要 min/中央値/max）。`SINCE`（UTC ISO8601、引数でも可）以降に開始したバッチだけが対象。
+1 バッチ所要 min/中央値/max）。`SINCE`（別名 `START_TIME`。UTC ISO8601、引数でも可）以降に開始したバッチだけが対象。
 旧 load.sh が作った壊れたタイムスタンプ（`.3N` 問題）は `.3N` を除去して秒精度で読む。
 それでも parse できない値は除外して件数を報告する。
 load.sh 側は python3 でミリ秒を生成するよう修正済み（macOS / Linux 両対応。python3 が無ければ `.000Z`）。
